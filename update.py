@@ -23,33 +23,38 @@ else:
 
 existing_urls = set([item["link"] for item in news_data])
 
+# 【パワーアップ】ロイター通信や国際ニュースを追加してソースを強化
 rss_urls = [
     "https://news.yahoo.co.jp/rss/topics/business.xml",
     "https://www.nhk.or.jp/rss/news/cat6.xml",
     "https://news.yahoo.co.jp/rss/media/bloom_st/all.xml",
+    "https://news.yahoo.co.jp/rss/media/reut/all.xml",   # 追加：ロイター通信
+    "https://news.yahoo.co.jp/rss/topics/world.xml",     # 追加：Yahoo国際（地政学・マクロ用）
     "https://media.rakuten-sec.net/list/feed/rss",
     "https://news.google.com/rss/search?q=%E6%8A%95%E8%B3%87+OR+%E6%A0%AA%E5%BC%8F+OR+%E7%82%BA%E6%9B%BF&hl=ja&gl=JP&ceid=JP:ja",
     "https://news.google.com/rss/search?q=%E5%AE%87%E5%AE%99+OR+%E9%98%B2%E8%A1%9B+OR+%E3%82%B5%E3%82%A4%E3%83%90%E3%83%BC+OR+%E3%83%AC%E3%82%A2%E3%82%A2%E3%83%BC%E3%82%B9+OR+%E3%82%A8%E3%83%8D%E3%83%AB%E3%82%AE%E3%83%BC&hl=ja&gl=JP&ceid=JP:ja"
 ]
 
 all_entries = []
-count_per_site = 15 // len(rss_urls) or 1
 
 for url in rss_urls:
     try:
         feed = feedparser.parse(url)
+        # 各サイトから満遍なくピックアップ
+        count = 0
         for entry in feed.entries:
             if entry.link not in existing_urls:
                 all_entries.append(entry)
-                if len(all_entries) >= count_per_site * len(rss_urls):
+                count += 1
+                if count >= 6: # 1サイトあたりの取得数を少し増やす
                     break
     except Exception:
         pass
 
 random.shuffle(all_entries)
-target_entries = all_entries[:15]
+# 【パワーアップ】1回の処理上限を15件から30件に倍増
+target_entries = all_entries[:30]
 
-# 新しい実践的なカテゴリ
 categories = ["株式・投資信託", "成長テーマ", "マクロ経済・地政学", "為替・金利", "不動産・生活", "その他"]
 JST = timezone(timedelta(hours=+9), 'JST')
 current_time_str = datetime.now(JST).isoformat()
@@ -59,7 +64,6 @@ for entry in target_entries:
     title = entry.title
     link = entry.link
     
-    # プロンプトを詳細化し、AIが迷わないように指示
     prompt = f"""
     あなたはプロの機関投資家です。以下のニュースを分析してください。
     ニュースタイトル: {title}
@@ -79,7 +83,6 @@ for entry in target_entries:
         response = model.generate_content(prompt)
         ai_text = response.text
         
-        # 判定を少し「ゆるく」して、取りこぼしを防ぐ
         detected_category = "その他"
         for cat in categories:
             if cat in ai_text:
@@ -95,7 +98,9 @@ for entry in target_entries:
         })
     except Exception:
         pass
-    time.sleep(2)
+    
+    # AIの無料制限（連続アクセス）を回避するため、待機時間を4秒に延長
+    time.sleep(4)
 
 news_data.extend(new_articles)
 filtered_news_data = []
