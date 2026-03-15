@@ -3,12 +3,10 @@ import json
 import os
 from datetime import datetime
 
-# --- 1. 画面のデザイン ---
 st.set_page_config(page_title="投資ニュースAI", page_icon="📈", layout="wide")
 st.title("投資ニュースAIまとめ (自動更新版)")
 st.write("裏方ロボットが定期的に収集・分析した最新の経済ニュースをストック表示しています。（直近3日間を保持）")
 
-# --- 2. 保存されたニュースデータの読み込み ---
 DATA_FILE = "news_data.json"
 news_data = []
 
@@ -19,16 +17,15 @@ if os.path.exists(DATA_FILE):
         except Exception:
             pass
 
-# --- 3. 画面への表示 ---
 if not news_data:
     st.warning("⏳ 現在表示できるニュースがありません。裏方ロボットが初回のデータ収集を終えるまで数分お待ちください。")
 else:
     st.success(f"📈 現在ストックされている有益な記事数: {len(news_data)}件")
     
-    categories = ["金融", "為替", "株式投資", "投資市場", "世界経済情勢", "日本経済情勢", "その他"]
+    # こちらも新しいカテゴリに合わせる
+    categories = ["株式・投資信託", "成長テーマ", "マクロ経済・地政学", "為替・金利", "不動産・生活", "その他"]
     results = {cat: [] for cat in categories}
     
-    # データをカテゴリごとに振り分け
     for item in news_data:
         cat = item.get("category", "その他")
         if cat in results:
@@ -36,7 +33,6 @@ else:
         else:
             results["その他"].append(item)
 
-    # カテゴリ別にタブで表示
     tabs = st.tabs(categories)
     
     for i, cat in enumerate(categories):
@@ -47,7 +43,6 @@ else:
                 for item in results[cat]:
                     st.subheader(f"📰 {item['title']}")
                     
-                    # 日付のフォーマットを見やすく調整
                     try:
                         dt = datetime.fromisoformat(item['fetched_at'])
                         formatted_time = dt.strftime("%Y/%m/%d %H:%M")
