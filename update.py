@@ -6,17 +6,14 @@ from datetime import datetime, timedelta, timezone
 import feedparser
 import google.generativeai as genai
 
-# 1. APIキーの設定 (GitHubのシークレットから読み込む)
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# モデル選択
 available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
 preferred_models = ['models/gemini-2.5-flash', 'models/gemini-1.5-flash', 'models/gemini-1.5-pro']
 selected_model = next((pm for pm in preferred_models if pm in available_models), available_models[0] if available_models else None)
 model = genai.GenerativeModel(selected_model.replace("models/", ""))
 
-# 2. 既存の保存データを読み込む（ファイルがなければ空のリストを作る）
 DATA_FILE = "news_data.json"
 if os.path.exists(DATA_FILE):
     with open(DATA_FILE, "r", encoding="utf-8") as f:
@@ -24,10 +21,8 @@ if os.path.exists(DATA_FILE):
 else:
     news_data = []
 
-# すでに保存済みのニュースURLをリストアップ（重複取得を防ぐため）
 existing_urls = set([item["link"] for item in news_data])
 
-# 3. ニュースサイトから最新記事を取得
 rss_urls = [
     "https://news.yahoo.co.jp/rss/topics/business.xml",
     "https://www.nhk.or.jp/rss/news/cat6.xml",
@@ -44,7 +39,6 @@ for url in rss_urls:
     try:
         feed = feedparser.parse(url)
         for entry in feed.entries:
-            # まだ保存されていない新しいニュースだけをピックアップ
             if entry.link not in existing_urls:
                 all_entries.append(entry)
                 if len(all_entries) >= count_per_site * len(rss_urls):
@@ -53,10 +47,10 @@ for url in rss_urls:
         pass
 
 random.shuffle(all_entries)
-target_entries = all_entries[:15] # 1回の起動で最大15件を新規分析
+target_entries = all_entries[:15]
 
-# 4. Geminiで分析
-categories = ["金融", "為替", "株式投資", "投資市場", "世界経済情勢", "日本経済情勢", "その他"]
+# 新しい実践的なカテゴリ
+categories = ["株式・投資信託", "成長テーマ", "マクロ経済・地政学", "為替・金利", "不動産・生活", "その他"]
 JST = timezone(timedelta(hours=+9), 'JST')
 current_time_str = datetime.now(JST).isoformat()
 new_articles = []
@@ -65,28 +59,33 @@ for entry in target_entries:
     title = entry.title
     link = entry.link
     
+    # プロンプトを詳細化し、AIが迷わないように指示
     prompt = f"""
     あなたはプロの機関投資家です。以下のニュースを分析してください。
     ニュースタイトル: {title}
     
     【指示】
-    1. 以下のカテゴリから最も適切なものを1つだけ選び、必ず「【カテゴリ】〇〇」という形式で1行目に書いてください。
-       [金融、為替、株式投資、投資市場、世界経済情勢、日本経済情勢、その他]
-    2. 市場や株価への影響を2〜3行で要約してください。
-    3. 特に、防衛、エネルギー、宇宙、サイバー、レアアースなどの成長セクターや中東情勢に関連する場合は見解を加えてください。
+    1. 以下のカテゴリリストから、最も関連性が高いものを1つだけ選び、必ず「【カテゴリ】〇〇」と出力してください。
+       - 株式・投資信託 (個別銘柄、投資信託、市場動向など)
+       - 成長テーマ (防衛、宇宙、サイバー、AI、エネルギー、レアアースなど)
+       - マクロ経済・地政学 (中東情勢、各国の経済指標、インフレなど)
+       - 為替・金利 (円高円安、日銀・FRBの政策など)
+       - 不動産・生活 (住宅、不動産市場、社会保障、個人の家計など)
+       - その他
+    2. このニュースが今後の市場や取引材料としてどう影響するか、2〜3行で要約してください。
     """
     
     try:
         response = model.generate_content(prompt)
         ai_text = response.text
         
+        # 判定を少し「ゆるく」して、取りこぼしを防ぐ
         detected_category = "その他"
         for cat in categories:
-            if f"【カテゴリ】{cat}" in ai_text or f"【カテゴリ】 {cat}" in ai_text:
+            if cat in ai_text:
                 detected_category = cat
                 break
         
-        # 分析結果に「取得した時間」のスタンプを押して保存リストに追加
         new_articles.append({
             "title": title,
             "link": link,
@@ -98,7 +97,6 @@ for entry in target_entries:
         pass
     time.sleep(2)
 
-# 5. データ結合と「3日以上前の古い記事」の自動削除
 news_data.extend(new_articles)
 filtered_news_data = []
 now = datetime.now(JST)
@@ -106,12 +104,10 @@ now = datetime.now(JST)
 for item in news_data:
     try:
         fetched_time = datetime.fromisoformat(item["fetched_at"])
-        # 現在時刻から3日（72時間）以内のものだけを残す
         if (now - fetched_time).days <= 3:
             filtered_news_data.append(item)
     except Exception:
         pass
 
-# 6. JSONファイルに上書き保存
 with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
