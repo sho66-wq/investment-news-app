@@ -1,9 +1,9 @@
 [
   {
-    "title": "🚨 【ロボットからの緊急SOS】AI分析がストップしました",
+    "title": "🛠️ 【システム診断レポート】現在の状態",
     "link": "https://github.com",
-    "summary": "エラーの種類: NotFound \n詳細: 404 models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.",
+    "summary": "⏱ 実行日時: 2026/03/16 03:42:27  \n✅ APIキー: 読み込み成功 (長さ: 39文字)  \n✅ RSS通信 (www.nhk.or.jp): 133件取得成功  \n⚠️ RSS通信 (media.rakuten-sec.net): 0件（海外サーバーとしてブロックされている可能性大）  \n✅ RSS通信 (news.google.com): 102件取得成功  \n❌ AI分析エラー: NotFound (制限に引っかかっている可能性あり)",
     "category": "その他",
-    "fetched_at": "2026-03-16T03:40:05.233374+09:00"
+    "fetched_at": "2026-03-16T03:42:30.205435+09:00"
   }
 ]
