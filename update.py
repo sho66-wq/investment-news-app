@@ -6,6 +6,9 @@ from datetime import datetime, timedelta, timezone
 import feedparser
 import google.generativeai as genai
 
+# 【改修1】ロボットであることを隠し、普通のブラウザのフリをする（アクセス拒否対策）
+feedparser.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
@@ -25,14 +28,13 @@ if len(news_data) < 10:
 
 existing_urls = set([item.get("link", "") for item in news_data])
 
+# 【改修2】海外サーバー（GitHub）からでも確実に取得できるソースに厳選
 rss_urls = [
-    "https://news.yahoo.co.jp/rss/topics/business.xml",
-    "https://www.nhk.or.jp/rss/news/cat6.xml",
-    "https://news.yahoo.co.jp/rss/media/bloom_st/all.xml",
-    "https://news.yahoo.co.jp/rss/media/reut/all.xml",
-    "https://news.yahoo.co.jp/rss/topics/world.xml",
-    "https://media.rakuten-sec.net/list/feed/rss",
-    "https://news.google.com/rss/search?q=%E6%8A%95%E8%B3%87+OR+%E6%A0%AA%E5%BC%8F+OR+%E7%82%BA%E6%9B%BF&hl=ja&gl=JP&ceid=JP:ja"
+    "https://www.nhk.or.jp/rss/news/cat6.xml", # NHK
+    "https://media.rakuten-sec.net/list/feed/rss", # トウシル
+    "https://news.google.com/rss/search?q=%E6%8A%95%E8%B3%87+OR+%E7%B5%8C%E6%B8%88+OR+%E7%82%BA%E6%9B%BF&hl=ja&gl=JP&ceid=JP:ja", # Google: 投資・経済・為替
+    "https://news.google.com/rss/search?q=%E6%A0%AA%E5%BC%8F%E4%BC%9A%E7%A4%BE+OR+%E6%A5%AD%E7%B8%BE+OR+%E6%B1%BA%E7%AE%97&hl=ja&gl=JP&ceid=JP:ja", # Google: 企業業績・決算
+    "https://news.google.com/rss/search?q=%E5%AE%87%E5%AE%99+OR+%E9%98%B2%E8%A1%9B+OR+%E3%82%B5%E3%82%A4%E3%83%90%E3%83%BC+OR+%E3%83%AC%E3%82%A2%E3%82%A2%E3%83%BC%E3%82%B9&hl=ja&gl=JP&ceid=JP:ja" # Google: 成長テーマ
 ]
 
 all_entries = []
@@ -44,7 +46,7 @@ for url in rss_urls:
             if entry.link not in existing_urls:
                 all_entries.append(entry)
                 count += 1
-                if count >= 6: 
+                if count >= 8: # 1サイトから最大8件
                     break
     except Exception:
         pass
@@ -55,6 +57,16 @@ target_entries = all_entries[:30]
 JST = timezone(timedelta(hours=+9), 'JST')
 current_time_str = datetime.now(JST).isoformat()
 new_articles = []
+
+# 【万が一の安全装置】1件もニュースが取れなかった場合のSOS
+if len(target_entries) == 0:
+    new_articles.append({
+        "title": "🚨 【原因判明】ニュースサイトから記事を取得できませんでした",
+        "link": "https://github.com",
+        "summary": "設定されたニュースサイトから新しい記事が1件も取得できませんでした。サイト側がアクセスをブロックしている可能性があります。",
+        "category": "その他",
+        "fetched_at": current_time_str
+    })
 
 for entry in target_entries:
     title = entry.title
@@ -96,16 +108,14 @@ for entry in target_entries:
         time.sleep(5)
         
     except Exception as e:
-        # 【エラー可視化の裏技】エラー内容をニュース記事のフリをして保存する
         error_msg = f"エラーの種類: {type(e).__name__} \n詳細: {str(e)}"
         new_articles.append({
             "title": "🚨 【ロボットからの緊急SOS】AI分析がストップしました",
             "link": "https://github.com",
             "summary": error_msg,
-            "category": "その他", # その他タブに表示させます
+            "category": "その他",
             "fetched_at": current_time_str
         })
-        # 1つエラーが出たら、4分も無駄に待たないように即座にロボットを止める
         break 
 
 news_data.extend(new_articles)
