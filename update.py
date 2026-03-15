@@ -8,8 +8,6 @@ import google.generativeai as genai
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
-
-# 【重要な修正1】速度制限に引っかからないよう、高速・軽量な「Flash」モデルに完全固定
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 DATA_FILE = "news_data.json"
@@ -46,13 +44,13 @@ for url in rss_urls:
             if entry.link not in existing_urls:
                 all_entries.append(entry)
                 count += 1
-                if count >= 8:
+                if count >= 6: 
                     break
     except Exception:
         pass
 
 random.shuffle(all_entries)
-target_entries = all_entries[:30] # 確実な処理のため30件に
+target_entries = all_entries[:30]
 
 JST = timezone(timedelta(hours=+9), 'JST')
 current_time_str = datetime.now(JST).isoformat()
@@ -76,7 +74,6 @@ for entry in target_entries:
         response = model.generate_content(prompt)
         ai_text = response.text
         
-        # 【重要な修正2】AIが少し間違えてもカバーする「賢い振り分け（ファジー判定）」
         detected_category = "その他"
         if "株式" in ai_text or "投資" in ai_text:
             detected_category = "株式・投資信託"
@@ -96,12 +93,20 @@ for entry in target_entries:
             "category": detected_category,
             "fetched_at": current_time_str
         })
-        
-        time.sleep(5) # Flashモデルの制限（15回/分）に合わせて5秒待機
+        time.sleep(5)
         
     except Exception as e:
-        print(f"Error on {title}: {e}")
-        time.sleep(10)
+        # 【エラー可視化の裏技】エラー内容をニュース記事のフリをして保存する
+        error_msg = f"エラーの種類: {type(e).__name__} \n詳細: {str(e)}"
+        new_articles.append({
+            "title": "🚨 【ロボットからの緊急SOS】AI分析がストップしました",
+            "link": "https://github.com",
+            "summary": error_msg,
+            "category": "その他", # その他タブに表示させます
+            "fetched_at": current_time_str
+        })
+        # 1つエラーが出たら、4分も無駄に待たないように即座にロボットを止める
+        break 
 
 news_data.extend(new_articles)
 filtered_news_data = []
