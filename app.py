@@ -2,6 +2,7 @@ import streamlit as st
 import feedparser
 import google.generativeai as genai
 import time
+import random
 
 # --- 1. APIキーの設定 ---
 try:
@@ -21,21 +22,44 @@ model = genai.GenerativeModel(selected_model.replace("models/", ""))
 st.set_page_config(page_title="投資ニュースAIサマリー", page_icon="📈", layout="wide")
 st.title("📊 個人専用：投資ニュースAIサマリー")
 
-# 分析するニュースの件数を設定（今回は15件）
-news_count = st.slider("取得するニュースの件数を選んでください", min_value=5, max_value=30, value=15)
+# 取得先が増えたので、最大件数も少し増やしておきます
+news_count = st.slider("取得するニュースの総件数を選んでください", min_value=10, max_value=50, value=20, step=5)
 
 if st.button("🔄 ニュースを取得して分析開始"):
     
-    # カテゴリの用意
     categories = ["金融", "為替", "株式投資", "投資市場", "世界経済情勢", "日本経済情勢", "その他"]
     results = {cat: [] for cat in categories}
     
-    rss_url = "https://news.yahoo.co.jp/rss/topics/business.xml"
-    feed = feedparser.parse(rss_url)
-    target_entries = feed.entries[:news_count]
+    # 【大幅強化】プロ向けの情報源と特定セクターのレーダーを追加
+    rss_urls = [
+        "https://news.yahoo.co.jp/rss/topics/business.xml", # Yahoo!ビジネス
+        "https://www.nhk.or.jp/rss/news/cat6.xml",           # NHK 経済
+        "https://news.yahoo.co.jp/rss/media/bloom_st/all.xml", # ブルームバーグ（Yahoo経由）
+        "https://media.rakuten-sec.net/list/feed/rss",      # トウシル（楽天証券の投資メディア）
+        "https://news.google.com/rss/search?q=%E6%8A%95%E8%B3%87+OR+%E6%A0%AA%E5%BC%8F+OR+%E7%82%BA%E6%9B%BF&hl=ja&gl=JP&ceid=JP:ja", # Googleニュース (投資全般)
+        "https://news.google.com/rss/search?q=%E5%AE%87%E5%AE%99+OR+%E9%98%B2%E8%A1%9B+OR+%E3%82%B5%E3%82%A4%E3%83%90%E3%83%BC+OR+%E3%83%AC%E3%82%A2%E3%82%A2%E3%83%BC%E3%82%B9+OR+%E3%82%A8%E3%83%8D%E3%83%AB%E3%82%AE%E3%83%BC&hl=ja&gl=JP&ceid=JP:ja" # Googleニュース (成長セクター特化)
+    ]
+    
+    all_entries = []
+    
+    # 各サイトから均等に記事を取得する
+    count_per_site = news_count // len(rss_urls)
+    # 割り切れなかった分の余りを補正
+    count_per_site = count_per_site if count_per_site > 0 else 1 
 
-    # プログレスバー（進捗状況）を表示
-    progress_text = "AIがニュースを読み込んで分析中..."
+    for url in rss_urls:
+        try:
+            feed = feedparser.parse(url)
+            all_entries.extend(feed.entries[:count_per_site])
+        except Exception:
+            pass # どこかのサイトが一時的に落ちていても無視して進む
+        
+    # 記事の順番をランダムに混ぜる
+    random.shuffle(all_entries)
+    
+    target_entries = all_entries[:news_count]
+
+    progress_text = "世界中のメディアからニュースを集め、AIが分析中..."
     my_bar = st.progress(0, text=progress_text)
     
     for i, entry in enumerate(target_entries):
@@ -57,14 +81,12 @@ if st.button("🔄 ニュースを取得して分析開始"):
             response = model.generate_content(prompt)
             ai_text = response.text
             
-            # AIの回答からカテゴリを自動判別して振り分ける
             detected_category = "その他"
             for cat in categories:
                 if f"【カテゴリ】{cat}" in ai_text or f"【カテゴリ】 {cat}" in ai_text:
                     detected_category = cat
                     break
             
-            # 結果を辞書に保存
             results[detected_category].append({
                 "title": title,
                 "link": link,
@@ -72,13 +94,12 @@ if st.button("🔄 ニュースを取得して分析開始"):
             })
             
         except Exception as e:
-            pass # エラーが起きても止まらずに次のニュースへ
+            pass
             
-        # 進捗バーを更新
         my_bar.progress((i + 1) / len(target_entries), text=f"{i+1}件目の分析が完了...")
-        time.sleep(2) # 連続アクセス制限を防ぐ
+        time.sleep(2)
         
-    my_bar.empty() # 終わったらバーを消す
+    my_bar.empty()
     st.success("✅ 全ての分析が完了しました！")
 
     # --- 3. カテゴリ別にタブで表示する ---
