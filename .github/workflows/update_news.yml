@@ -1,0 +1,37 @@
+name: Update News Data
+
+on:
+  schedule:
+    # 毎日 日本時間の 7:00, 15:00, 23:00 に自動実行
+    - cron: '0 22,6,14 * * *'
+  workflow_dispatch: # 手動で「今すぐ実行」ボタンも使えるようにする設定
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        pip install feedparser google-generativeai
+
+    - name: Run update script
+      env:
+        GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      run: python update.py
+
+    - name: Commit and push changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add news_data.json
+        # 変更があった場合のみ保存する
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update news data" && git push)
