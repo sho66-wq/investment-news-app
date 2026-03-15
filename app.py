@@ -19,8 +19,8 @@ selected_model = next((pm for pm in preferred_models if pm in available_models),
 model = genai.GenerativeModel(selected_model.replace("models/", ""))
 
 # --- 2. 画面のデザイン ---
-st.set_page_config(page_title="投資ニュースAIサマリー", page_icon="📈", layout="wide")
-st.title("📊 個人専用：投資ニュースAIサマリー")
+st.set_page_config(page_title="投資ニュースAI", page_icon="📈", layout="wide")
+st.title("投資ニュースAIまとめ")
 
 # 取得先が増えたので、最大件数も少し増やしておきます
 news_count = st.slider("取得するニュースの総件数を選んでください", min_value=10, max_value=50, value=20, step=5)
