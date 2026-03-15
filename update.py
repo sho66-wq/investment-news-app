@@ -1,19 +1,18 @@
 import os
 import json
-import time
 import random
 from datetime import datetime, timedelta, timezone
 import feedparser
 import google.generativeai as genai
 
-# アクセス拒否対策（ブラウザのフリをする）
+# アクセス拒否対策
 feedparser.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# ログで成功が確認できた最新モデルを指定
-model = genai.GenerativeModel("models/gemini-2.5-flash")
+# 最新モデルを指定
+model = genai.GenerativeModel("gemini-2.5-flash")
 
 DATA_FILE = "news_data.json"
 try:
@@ -25,7 +24,6 @@ try:
 except:
     news_data = []
 
-# 古いゴーストデータやテスト結果をリセット
 if len(news_data) < 5:
     news_data = []
 
@@ -47,71 +45,83 @@ for url in rss_urls:
             if entry.link not in existing_urls:
                 all_entries.append(entry)
                 count += 1
-                if count >= 8:
+                if count >= 6:
                     break
     except Exception:
         pass
 
 random.shuffle(all_entries)
-
-# 【重要な修正1】APIの制限（20回）を絶対に超えないよう、1回の取得を「15件」に制限
+# 1回の処理で最大15件を「まとめ買い」
 target_entries = all_entries[:15]
 
 JST = timezone(timedelta(hours=+9), 'JST')
 current_time_str = datetime.now(JST).isoformat()
 new_articles = []
 
-for entry in target_entries:
-    title = entry.title
-    link = entry.link
-    
-    prompt = f"""
-    あなたはプロの機関投資家です。以下のニュースを分析してください。
-    ニュースタイトル: {title}
-    
-    【指示】
-    1. 以下の6つのカテゴリから最も関連性が高いものを1つ選び、「【カテゴリ】〇〇」と出力してください。
-       [株式・投資信託, 成長テーマ, マクロ経済・地政学, 為替・金利, 不動産・生活, その他]
-    2. このニュースが今後の市場や取引材料としてどう影響するか、2〜3行で要約してください。
-    """
-    
+if target_entries:
+    # 15件のニュースを1つのプロンプトにまとめる（API枠の節約）
+    prompt = "あなたはプロの機関投資家です。以下の複数のニュースを分析し、指定されたJSON形式で出力してください。\n\n"
+    for i, entry in enumerate(target_entries):
+        prompt += f"[{i}] タイトル: {entry.title}\n"
+        
+    prompt += """
+【指示】
+それぞれのニュースについて、以下の6つのカテゴリから最も関連性が高いものを1つ選び、今後の市場や取引材料としてどう影響するか2〜3行で要約してください。
+カテゴリ: [株式・投資信託, 成長テーマ, マクロ経済・地政学, 為替・金利, 不動産・生活, その他]
+
+【出力フォーマット（必ず以下の厳密なJSON配列のみを出力してください。バッククォートなどの装飾は不要です）】
+[
+  {
+    "id": 0,
+    "category": "カテゴリ名",
+    "summary": "要約テキスト"
+  },
+  {
+    "id": 1,
+    "category": "カテゴリ名",
+    "summary": "要約テキスト"
+  }
+]
+"""
     try:
+        # 1日20回の貴重な枠を「1回」だけ使って、全員分を一気に分析させる
         response = model.generate_content(prompt)
         ai_text = response.text
         
-        detected_category = "その他"
-        if "株式" in ai_text or "投資" in ai_text:
-            detected_category = "株式・投資信託"
-        elif "成長" in ai_text or "防衛" in ai_text or "宇宙" in ai_text or "サイバー" in ai_text or "レアアース" in ai_text:
-            detected_category = "成長テーマ"
-        elif "マクロ" in ai_text or "地政学" in ai_text or "中東" in ai_text:
-            detected_category = "マクロ経済・地政学"
-        elif "為替" in ai_text or "金利" in ai_text or "円高" in ai_text or "円安" in ai_text:
-            detected_category = "為替・金利"
-        elif "不動産" in ai_text or "生活" in ai_text or "住宅" in ai_text:
-            detected_category = "不動産・生活"
+        # Markdownの装飾が含まれていた場合は除去する
+        if "```json" in ai_text:
+            ai_text = ai_text.split("```json")[1].split("```")[0]
+        elif "```" in ai_text:
+            ai_text = ai_text.split("```")[1].split("```")[0]
+            
+        results = json.loads(ai_text.strip())
         
+        # 分析結果と元のURLを結合
+        for res in results:
+            idx = res.get("id")
+            if idx is not None and 0 <= idx < len(target_entries):
+                entry = target_entries[idx]
+                new_articles.append({
+                    "title": entry.title,
+                    "link": entry.link,
+                    "summary": res.get("summary", "要約に失敗しました。"),
+                    "category": res.get("category", "その他"),
+                    "fetched_at": current_time_str
+                })
+    except Exception as e:
+        # 枠がまだ回復していない場合はここに入ります
         new_articles.append({
-            "title": title,
-            "link": link,
-            "summary": ai_text,
-            "category": detected_category,
+            "title": "🚨 AI分析エラー（容量制限の可能性）",
+            "link": "https://github.com",
+            "summary": f"APIの無料枠制限、または出力エラーが発生しました。\n詳細: {str(e)}",
+            "category": "その他",
             "fetched_at": current_time_str
         })
-        time.sleep(5) 
-        
-    except Exception as e:
-        # 【重要な修正2】制限にぶつかったら、今まで取れた分（new_articles）を破棄せずに保存して終了する
-        if "429" in str(e) or "Quota" in str(e):
-            break
-        time.sleep(10)
 
-# 古いデータに新しいデータを追加
 news_data.extend(new_articles)
 filtered_news_data = []
 now = datetime.now(JST)
 
-# 直近3日間のデータだけを残す
 for item in news_data:
     try:
         fetched_time = datetime.fromisoformat(item["fetched_at"])
@@ -120,6 +130,5 @@ for item in news_data:
     except Exception:
         pass
 
-# 最終保存
 with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
