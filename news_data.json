@@ -1,1 +1,9 @@
-[]
+[
+  {
+    "title": "🚨 【ロボットからの緊急SOS】AI分析がストップしました",
+    "link": "https://github.com",
+    "summary": "エラーの種類: NotFound \n詳細: 404 models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.",
+    "category": "その他",
+    "fetched_at": "2026-03-16T03:37:00.191360+09:00"
+  }
+]
