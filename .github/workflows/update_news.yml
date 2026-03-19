@@ -2,37 +2,35 @@ name: Update News Data
 
 on:
   schedule:
-    # 毎日 日本時間の 7:00, 15:00, 23:00 に自動実行
-    - cron: '0 22,6,14 * * *'
-  workflow_dispatch: # 手動で「今すぐ実行」ボタンも使えるようにする設定
+    - cron: '0 */6 * * *' # 6時間ごとに自動実行
+  workflow_dispatch: # 手動実行ボタンを有効化
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11' # 【修正】古いという警告を消すために 3.11 に最新化
 
-    - name: Install dependencies
-      run: |
-        pip install feedparser google-generativeai requests beautifulsoup4
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # 【重要】ここに yfinance と pandas を確実にインストールするよう指示
+          pip install feedparser google-generativeai requests beautifulsoup4 yfinance pandas
 
-    - name: Run update script
-      env:
-        GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-      run: python update.py
+      - name: Run script
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: python update.py
 
-    - name: Commit and push changes
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add . news_data.json
-      
-        # 変更があった場合のみ保存する
-        git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update news data" && git push)
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git commit -m "Update news and schedule data" || echo "No changes to commit"
+          git push
