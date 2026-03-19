@@ -82,16 +82,16 @@ else:
     
     categories = [
         "国内株・企業業績", "米国株・海外株", "日米金利・物価・為替", "世界経済・マクロ指標", 
-        "国際情勢・地政学", "成長テーマ・新技術", "商品・暗号資産", 
+        "世界情勢・地政学", "成長テーマ・新技術", "商品・暗号資産", 
         "不動産・住宅市場", "生活・社会保障", "その他"
     ]
     
     results = {cat: [] for cat in categories}
     
-    # 【追加】古いカテゴリ名で保存された過去記事を、新しい10カテゴリに自動で振り分ける辞書
     legacy_mapping = {
         "株式・投資信託": "国内株・企業業績",
-        "マクロ経済・地政学": "国際情勢・地政学",
+        "国際情勢・地政学": "世界情勢・地政学",
+        "マクロ経済・地政学": "世界情勢・地政学",
         "為替・金利": "日米金利・物価・為替",
         "不動産・生活": "生活・社会保障",
         "成長テーマ": "成長テーマ・新技術"
@@ -99,15 +99,24 @@ else:
     
     for item in news_data:
         cat = item.get("category", "その他")
+        title_summary = item.get("title", "") + item.get("summary", "")
         
-        # もし古い名札（cat）がついていたら、新しい名札に貼り替える！
+        # 過去記事のカテゴリ名を最新版に変換
         if cat in legacy_mapping:
             cat = legacy_mapping[cat]
             
-        if cat in results:
-            results[cat].append(item)
-        else:
-            results["その他"].append(item)
+        # 【魔法のお掃除機能】「その他」に入っている過去記事をキーワードで強制救済！
+        if cat == "その他":
+            if any(k in title_summary for k in ["トランプ", "台湾", "ロシア", "ウクライナ", "制裁", "紛争", "外交"]):
+                cat = "世界情勢・地政学"
+            elif any(k in title_summary for k in ["原油", "バレル", "経済悪影響", "インフレ"]):
+                cat = "世界経済・マクロ指標"
+        
+        # 安全装置
+        if cat not in categories:
+            cat = "その他"
+            
+        results[cat].append(item)
 
     tabs = st.tabs(categories)
     
