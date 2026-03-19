@@ -14,6 +14,10 @@ if os.path.exists(DATA_FILE):
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         try:
             news_data = json.load(f)
+            
+            # 【ここが魔法の1行！】データを「取得日時（fetched_at）」の新しい順に並び替える
+            news_data.sort(key=lambda x: x.get("fetched_at", ""), reverse=True)
+            
         except Exception:
             pass
 
@@ -22,7 +26,6 @@ if not news_data:
 else:
     st.success(f"📈 現在ストックされている有益な記事数: {len(news_data)}件")
     
-    # こちらも新しいカテゴリに合わせる
     categories = ["株式・投資信託", "成長テーマ", "マクロ経済・地政学", "為替・金利", "不動産・生活", "その他"]
     results = {cat: [] for cat in categories}
     
