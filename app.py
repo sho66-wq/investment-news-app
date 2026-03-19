@@ -82,9 +82,15 @@ if not news_data:
 else:
     st.success(f"📈 現在ストックされている有益な記事数: {len(news_data)}件")
     
-    categories = ["株式・投資信託", "成長テーマ", "マクロ経済・地政学", "為替・金利", "不動産・生活", "その他"]
-    results = {cat: [] for cat in categories}
+    # 変更前
+    # categories = ["株式・投資信託", "成長テーマ", "マクロ経済・地政学", "為替・金利", "不動産・生活", "その他"]
     
+    # 変更後（これにコピペで丸ごと上書きしてください）
+    categories = [
+        "国内株・企業業績", "米国株・海外株", "日米金利・物価・為替", "世界経済・マクロ指標", 
+        "国際情勢・地政学", "成長テーマ・新技術", "商品・暗号資産", 
+        "不動産・住宅市場", "生活・社会保障", "その他"
+    ]
     for item in news_data:
         cat = item.get("category", "その他")
         if cat in results:
