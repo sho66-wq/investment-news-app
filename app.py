@@ -40,7 +40,7 @@ if os.path.exists(SCHEDULE_FILE):
         with col2:
             with st.container(border=True):
                 st.markdown("#### 📈 指定12指数・為替")
-                # 真っ白になったTradingViewを撤去し、確実なテキスト表示に戻しました
+                # TradingViewを撤去し、確実なテキスト表示に戻しました
                 st.markdown(sched_data.get('indices', 'データなし'))
                 
         with col3:
