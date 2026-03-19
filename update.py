@@ -134,11 +134,13 @@ with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
 
 
-# --- 【二刀流ハイブリッド】指数の取得 ---
+# --- 【不死身のハイブリッド】指数の取得（Yahoo + Google Finance） ---
 display_lines = {}
 symbols = {
     "^N225": "日本日経平均",
     "NIY=F": "日経先物",
+    "^TOPX": "日本TOPIX",
+    "^JN09T": "日本国債10年利回り",
     "JPY=X": "為替 ドル円",
     "EURJPY=X": "為替 ユーロ円",
     "^DJI": "米国NYダウ",
@@ -149,6 +151,9 @@ symbols = {
     "BTC-JPY": "ビットコイン"
 }
 
+failed_names = []
+
+# まずYahooファイナンスAPIで一気に取得
 for sym, name in symbols.items():
     try:
         ticker = yf.Ticker(sym)
@@ -169,72 +174,90 @@ for sym, name in symbols.items():
             price_str = f"{current:.2f}" if current < 1000 else f"{current:,.2f}"
             display_lines[name] = f"- **:blue[{name}]**: {price_str} ({arrow})\n"
         else:
-            display_lines[name] = f"- **:blue[{name}]**: 取得不可\n"
+            failed_names.append(name)
     except Exception:
-        display_lines[name] = f"- **:blue[{name}]**: 取得不可\n"
+        failed_names.append(name)
 
-try:
-    url_topix = "https://finance.yahoo.co.jp/quote/998405.O"
-    url_jgb = "https://finance.yahoo.co.jp/quote/035240069.FX"
-    headers_yf = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+# 取得に失敗した指数（TOPIXなど）があれば、Google Financeから強制取得！
+if failed_names:
+    gf_urls = {
+        "日本日経平均": "https://www.google.com/finance/quote/NI225:INDEXNIK",
+        "日経先物": "https://www.google.com/finance/quote/NK2251!:OSE",
+        "日本TOPIX": "https://www.google.com/finance/quote/TOPIX:INDEXTKY",
+        "日本国債10年利回り": "https://www.google.com/finance/quote/JP10Y:BOND",
+        "為替 ドル円": "https://www.google.com/finance/quote/USD-JPY",
+        "為替 ユーロ円": "https://www.google.com/finance/quote/EUR-JPY",
+        "米国NYダウ": "https://www.google.com/finance/quote/DJI:INDEXDJX",
+        "VIX恐怖指数": "https://www.google.com/finance/quote/VIX:INDEXCBOE",
+        "日経VI": "https://www.google.com/finance/quote/NI225VIX:INDEXNIK",
+        "WTI原油先物": "https://www.google.com/finance/quote/CLW00:NYMEX",
+        "NY金先物": "https://www.google.com/finance/quote/GCW00:COMEX",
+        "ビットコイン": "https://www.google.com/finance/quote/BTC-JPY"
+    }
     
-    res_t = requests.get(url_topix, headers=headers_yf, timeout=10)
-    soup_t = BeautifulSoup(res_t.text, "html.parser")
-    for s in soup_t(["script", "style"]): s.extract()
-    text_t = soup_t.get_text(separator=' ', strip=True)[:3000]
-    
-    res_j = requests.get(url_jgb, headers=headers_yf, timeout=10)
-    soup_j = BeautifulSoup(res_j.text, "html.parser")
-    for s in soup_j(["script", "style"]): s.extract()
-    text_j = soup_j.get_text(separator=' ', strip=True)[:3000]
+    fallback_text = ""
+    headers_gf = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
 
-    prompt_missing = f"""
-    あなたはデータ抽出AIです。以下の2つのWebページから、TOPIXと日本国債10年利回りの「最新価格」と「前日比」を抽出してください。
-    【ページ1（TOPIX）】\n{text_t}
-    【ページ2（日本国債）】\n{text_j}
-    必ず以下のJSONフォーマットで返してください。
-    {{
-      "topix_price": "価格の数字のみ",
-      "topix_change": "前日比の数字のみ（例: +10.50）",
-      "jgb_price": "利回りの数字のみ（例: 0.750）",
-      "jgb_change": "前日比の数字のみ（例: -0.010）"
-    }}
-    """
-    response_missing = model.generate_content(
-        prompt_missing, 
-        safety_settings=safety_settings,
-        generation_config={"response_mime_type": "application/json"}
-    )
-    if response_missing.parts:
-        data_m = json.loads(response_missing.text)
-        
-        tp = data_m.get("topix_price", "")
-        tc = data_m.get("topix_change", "")
-        if tp and tc and "取得" not in tp:
-            arr_t = f":green[↑ {tc}]" if "+" in tc else (f":red[↓ {tc}]" if "-" in tc else "±0")
-            display_lines["日本TOPIX"] = f"- **:blue[日本TOPIX]**: {tp} ({arr_t})\n"
-        else:
-            display_lines["日本TOPIX"] = f"- **:blue[日本TOPIX]**: 取得不可\n"
-            
-        jp = data_m.get("jgb_price", "")
-        jc = data_m.get("jgb_change", "")
-        if jp and jc and "取得" not in jp:
-            arr_j = f":green[↑ {jc}%]" if "+" in jc else (f":red[↓ {jc}%]" if "-" in jc else "±0%")
-            if "%" not in jp: jp += "%"
-            display_lines["日本国債10年利回り"] = f"- **:blue[日本国債10年利回り]**: {jp} ({arr_j})\n"
-        else:
-            display_lines["日本国債10年利回り"] = f"- **:blue[日本国債10年利回り]**: 取得不可\n"
-except Exception as e:
-    display_lines["日本TOPIX"] = f"- **:blue[日本TOPIX]**: 取得不可\n"
-    display_lines["日本国債10年利回り"] = f"- **:blue[日本国債10年利回り]**: 取得不可\n"
+    for name in failed_names:
+        url = gf_urls.get(name)
+        if url:
+            try:
+                res = requests.get(url, headers=headers_gf, timeout=10)
+                soup = BeautifulSoup(res.text, "html.parser")
+                for s in soup(["script", "style"]): s.extract()
+                fallback_text += f"【{name}】\n" + soup.get_text(separator=' ', strip=True)[:3000] + "\n\n"
+            except:
+                pass
 
+    if fallback_text:
+        prompt_missing = f"""
+あなたはデータ抽出AIです。以下のWebページテキストから、指定された指数の「最新価格」と「前日比（%）」を抽出してください。
+
+テキストデータ:
+{fallback_text}
+
+必ず以下のJSONフォーマットで返してください。見つからない場合は空文字 "" にしてください。
+{{
+"""
+        for i, name in enumerate(failed_names):
+            prompt_missing += f'  "{name}_price": "価格",\n'
+            prompt_missing += f'  "{name}_change": "前日比（例: +1.23% または -0.45%）"'
+            if i < len(failed_names) - 1:
+                prompt_missing += ",\n"
+            else:
+                prompt_missing += "\n"
+        prompt_missing += "}"
+
+        try:
+            response_missing = model.generate_content(
+                prompt_missing, 
+                safety_settings=safety_settings,
+                generation_config={"response_mime_type": "application/json"}
+            )
+            if response_missing.parts:
+                data_m = json.loads(response_missing.text)
+                for name in failed_names:
+                    tp = data_m.get(f"{name}_price", "")
+                    tc = data_m.get(f"{name}_change", "")
+                    if tp and tc:
+                        arr_t = f":green[↑ {tc}]" if "+" in tc else (f":red[↓ {tc}]" if "-" in tc else f"({tc})")
+                        display_lines[name] = f"- **:blue[{name}]**: {tp} ({arr_t})\n"
+                    else:
+                        display_lines[name] = f"- **:blue[{name}]**: 取得不可\n"
+        except:
+            for name in failed_names:
+                display_lines[name] = f"- **:blue[{name}]**: 取得不可\n"
+
+# 順番通りに並べて、最後に「クリックできる」リンクを追加
 order = [
     "日本日経平均", "日経先物", "日本TOPIX", "日本国債10年利回り",
     "為替 ドル円", "為替 ユーロ円", "米国NYダウ", "VIX恐怖指数",
     "日経VI", "WTI原油先物", "NY金先物", "ビットコイン"
 ]
 indices_text = "".join([display_lines.get(k, f"- **:blue[{k}]**: 取得不可\n") for k in order])
-indices_text += "\n*(データ取得元: Yahoo Finance / Yahoo!ファイナンス)*\n"
+
+# 【修正】マークダウン形式でリンクをクリック可能にしました
+indices_text += "\n*(データ取得元: [Yahoo Finance](https://finance.yahoo.com/) / [Google Finance](https://www.google.com/finance/))*\n"
 
 
 # --- スケジュールとみんかぶのAIスクレイピング ---
@@ -259,7 +282,7 @@ try:
 
     schedule_prompt = f"""
 あなたは金融アシスタントです。以下の2つのWebページから情報を抽出し、必ず指定のJSON形式で出力してください。
-各値は配列や辞書にせず、1つの長い文字列にしてください。箇条書きは「- 」と改行「\\n」を使ってください。
+各値は配列や辞書にせず、必ず1つの長い文字列にしてください。箇条書きは「- 」と改行「\\n」を使ってください。
 
 {{
   "schedule": "【ページ1】から今週と本日の主な予定を抜粋（日付は ### で大きく）",
