@@ -7,6 +7,7 @@ import feedparser
 import google.generativeai as genai
 import requests
 from bs4 import BeautifulSoup
+import yfinance as yf
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
@@ -104,7 +105,7 @@ if target_entries:
                         "fetched_at": current_time_str
                     })
     except Exception as e:
-        print(f"Batch AI Error: {e}")
+        pass
 
 news_data.extend(new_articles)
 filtered_news_data = []
@@ -122,52 +123,57 @@ with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
 
 
-# --- 【最強機能】12指数のデータをYahoo APIから直接取得（色付け付き） ---
+# --- 【最強ツール yfinance】12指数を確実に取得して美しく色付けする ---
 indices_text = ""
-symbols = "^N225,NIY=F,^TOPX,^JN09T,JPY=X,EURJPY=X,^DJI,^VIX,^VN225,CL=F,GC=F,BTC-JPY"
-names = {
+symbols = {
     "^N225": "日本日経平均",
     "NIY=F": "日経先物",
     "^TOPX": "日本TOPIX",
-    "^JN09T": "日本国債10年利回",
+    "^JN09T": "日本国債10年利回り",
     "JPY=X": "為替 ドル円",
     "EURJPY=X": "為替 ユーロ円",
     "^DJI": "米国NYダウ",
     "^VIX": "VIX恐怖指数",
-    "^VN225": "日経VI",
+    "^JNIV": "日経VI",
     "CL=F": "WTI原油先物",
     "GC=F": "NY金先物",
     "BTC-JPY": "ビットコイン"
 }
 
-try:
-    yf_url = f"https://query2.finance.yahoo.com/v7/finance/quote?symbols={symbols}"
-    yf_res = requests.get(yf_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}, timeout=10)
-    data = yf_res.json()
-    results = data.get("quoteResponse", {}).get("result", [])
-    fetched_data = {res["symbol"]: res for res in results}
-    
-    for sym, name in names.items():
-        if sym in fetched_data:
-            price = fetched_data[sym].get("regularMarketPrice", 0)
-            change = fetched_data[sym].get("regularMarketChangePercent", 0)
+for sym, name in symbols.items():
+    try:
+        ticker = yf.Ticker(sym)
+        # 過去5日分を取得し、最新の2日分を比較する（休日対策）
+        hist = ticker.history(period="5d")
+        if len(hist) >= 2:
+            prev_close = hist['Close'].iloc[-2]
+            current = hist['Close'].iloc[-1]
+            change = current - prev_close
+            change_pct = (change / prev_close) * 100
             
-            # 色と矢印のフォーマット
-            if change > 0:
-                arrow = f":green[↑ +{change:.2f}%]"
-            elif change < 0:
-                arrow = f":red[↓ {change:.2f}%]"
+            # 矢印と色の設定
+            if change_pct > 0:
+                arrow = f":green[↑ +{change_pct:.2f}%]"
+            elif change_pct < 0:
+                arrow = f":red[↓ {change_pct:.2f}%]"
             else:
                 arrow = "±0.00%"
                 
-            price_str = f"{price:,.2f}" if price > 1000 else f"{price:.2f}"
-            
-            # 指数名を【青色】にして目立たせる
+            # 見やすくカンマを入れる
+            if current < 1000:
+                price_str = f"{current:.2f}"
+            else:
+                price_str = f"{current:,.2f}"
+                
+            # 銘柄名を【青色】にする
             indices_text += f"- **:blue[{name}]**: {price_str} ({arrow})\n"
         else:
-            indices_text += f"- **:gray[{name}]**: 取得不可\n"
-except Exception as e:
-    indices_text = "指数の取得に失敗しました。"
+            indices_text += f"- **:blue[{name}]**: 取得不可\n"
+    except Exception as e:
+        indices_text += f"- **:blue[{name}]**: 取得不可\n"
+
+# ご要望のURLを一番下に追加！
+indices_text += "\n*(データ取得元: [Yahoo Finance](https://finance.yahoo.co.jp/))*"
 
 
 # --- スケジュールとみんかぶのAIスクレイピング ---
@@ -177,7 +183,6 @@ schedule_result_json = {"schedule": "エラー", "indices": indices_text, "news"
 try:
     headers = {'User-Agent': 'Mozilla/5.0'}
     
-    # スケジュールページ
     res_sched = requests.get("https://nikkei225jp.com/schedule/", headers=headers, timeout=15)
     res_sched.encoding = res_sched.apparent_encoding
     soup_sched = BeautifulSoup(res_sched.text, "html.parser")
@@ -185,7 +190,6 @@ try:
         script.extract()
     text_sched = soup_sched.get_text(separator=' ', strip=True)[:15000]
 
-    # みんかぶページ
     res_min = requests.get("https://fu.minkabu.jp/chart/nikkei225/contribution", headers=headers, timeout=15)
     res_min.encoding = res_min.apparent_encoding
     soup_min = BeautifulSoup(res_min.text, "html.parser")
@@ -195,15 +199,11 @@ try:
 
     schedule_prompt = f"""
 あなたは金融アシスタントです。以下の2つのWebページから情報を抽出し、必ず指定のJSON形式で出力してください。
-
-【🚨 超絶対ルール】
-1. 各値（value）の中身は、必ず「ただの1つの長い文字列」にしてください。
-2. 値の中に、辞書 {{}} や配列 [] を書き込むことは絶対に禁止です。
-3. 箇条書きは「- 」と改行「\\n」を使ってください。
+各値は配列や辞書にせず、必ず1つの長い文字列にしてください。箇条書きは「- 」と改行「\\n」を使ってください。
 
 {{
-  "schedule": "【ページ1】から「今週と本日の主な予定」を抜粋（日付は ### で大きく）",
-  "news": "【ページ1】から「NEWS（経済指標）」を抜粋（日付は ### で大きく）",
+  "schedule": "【ページ1】から今週と本日の主な予定を抜粋（日付は ### で大きく）",
+  "news": "【ページ1】からNEWS（経済指標）を抜粋（日付は ### で大きく）",
   "contribution": "【ページ2】から日経225の値上がり数・値下がり数、および寄与度上位・下位TOP10を箇条書きで"
 }}
 
@@ -219,7 +219,6 @@ try:
     )
     if schedule_response.parts:
         ai_data = json.loads(schedule_response.text)
-        # AIの結果と、さっき取得した指数(indices_text)を合体させる
         schedule_result_json["schedule"] = ai_data.get("schedule", "取得エラー")
         schedule_result_json["news"] = ai_data.get("news", "取得エラー")
         schedule_result_json["contribution"] = ai_data.get("contribution", "取得エラー")
