@@ -30,7 +30,7 @@ if os.path.exists(SCHEDULE_FILE):
         with open(SCHEDULE_FILE, "r", encoding="utf-8") as f:
             sched_data = json.load(f)
             
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3 = st.columns([1, 1.2, 1])
         
         with col1:
             with st.container(border=True):
@@ -40,8 +40,31 @@ if os.path.exists(SCHEDULE_FILE):
         with col2:
             with st.container(border=True):
                 st.markdown("#### 📈 指定12指数・為替")
-                # TradingViewを撤去し、確実なテキスト表示に戻しました
-                st.markdown(sched_data.get('indices', 'データなし'))
+                
+                # 【100点デザイン】テキストの羅列をやめ、カード型のウィジェットを並べる
+                indices_data = sched_data.get('indices', {})
+                
+                if isinstance(indices_data, dict):
+                    order = [
+                        "日本日経平均", "日経先物", "日本TOPIX", "日本国債10年利回り",
+                        "為替 ドル円", "為替 ユーロ円", "米国NYダウ", "VIX恐怖指数",
+                        "日経VI", "WTI原油先物", "NY金先物", "ビットコイン"
+                    ]
+                    
+                    # 枠の中にさらに2つのカラムを作って、美しく配置する
+                    metric_cols = st.columns(2)
+                    for i, name in enumerate(order):
+                        data = indices_data.get(name, {"price": "取得不可", "change": "0.0"})
+                        price = data.get("price", "取得不可")
+                        change = data.get("change", "0.0")
+                        
+                        # st.metric を使って証券アプリのような美しい表示に！
+                        metric_cols[i % 2].metric(label=name, value=price, delta=change)
+                else:
+                    st.write("データのフォーマットが古いです。次の更新をお待ちください。")
+                    
+                st.caption("*(データ取得元: [Yahoo](https://finance.yahoo.co.jp/) / [Google](https://www.google.com/finance/) / [財務省](https://www.mof.go.jp/))*")
+                st.caption("※価格の横に(※)がある場合は、直近の取得に失敗したため前回のデータを表示しています。")
                 
         with col3:
             with st.container(border=True):
