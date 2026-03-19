@@ -11,13 +11,8 @@ from bs4 import BeautifulSoup
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# 【超重要修正】制限の厳しい「2.5」と「pro」を完全に排除し、1日1500回使えるタフなモデルだけを残す
-available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-safe_models = [m for m in available_models if "2.5" not in m and "pro" not in m]
-
-# 安全なモデルがあればそれを採用、なければ仕方なく一番上を採用
-target_model_name = safe_models[0] if safe_models else available_models[0]
-model = genai.GenerativeModel(target_model_name.replace("models/", ""))
+# 唯一無料で動く「2.5」を指定します
+model = genai.GenerativeModel("gemini-2.5-flash")
 
 DATA_FILE = "news_data.json"
 try:
@@ -62,7 +57,6 @@ target_entries = all_entries[:15]
 
 JST = timezone(timedelta(hours=+9), 'JST')
 current_time_str = datetime.now(JST).isoformat()
-new_articles = []
 
 safety_settings = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
@@ -71,49 +65,56 @@ safety_settings = [
     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
 ]
 
-for entry in target_entries:
-    title = entry.title
-    link = entry.link
-    
-    prompt = f"""
-    あなたはプロの機関投資家です。以下のニュースを分析してください。
-    ニュースタイトル: {title}
-    
-    【指示】
-    1. 以下の6つのカテゴリから最も関連性が高いものを1つ選び、「【カテゴリ】〇〇」と出力してください。
-       [株式・投資信託, 成長テーマ, マクロ経済・地政学, 為替・金利, 不動産・生活, その他]
-    2. このニュースが今後の市場や取引材料としてどう影響するか、2〜3行で要約してください。
-    """
-    
+new_articles = []
+
+if target_entries:
+    # --- 【最強の解決策】15件のニュースを「1回の質問」にまとめてAIに投げる ---
+    prompt = """
+あなたはプロの機関投資家です。以下の【ニュース一覧】を全て分析し、指定された【JSONフォーマット】で返してください。
+
+【カテゴリの選択肢】
+"株式・投資信託", "成長テーマ", "マクロ経済・地政学", "為替・金利", "不動産・生活", "その他"
+
+【JSONフォーマット（この形以外の文字は一切出力しないでください）】
+[
+  {
+    "id": 0,
+    "category": "選択したカテゴリ",
+    "summary": "今後の市場や取引材料としてどう影響するか、2〜3行の要約"
+  }
+]
+
+【ニュース一覧】
+"""
+    for i, entry in enumerate(target_entries):
+        prompt += f"ID: {i}\nタイトル: {entry.title}\n\n"
+
     try:
         response = model.generate_content(prompt, safety_settings=safety_settings)
-        if not response.parts:
-            continue
+        if response.parts:
+            # AIが返した文字列を整理して読み込む
+            result_text = response.text.strip()
+            if result_text.startswith("```json"):
+                result_text = result_text[7:]
+            if result_text.endswith("```"):
+                result_text = result_text[:-3]
             
-        ai_text = response.text
-        
-        detected_category = "その他"
-        if "株式" in ai_text or "投資" in ai_text:
-            detected_category = "株式・投資信託"
-        elif "成長" in ai_text or "防衛" in ai_text or "宇宙" in ai_text or "サイバー" in ai_text or "レア" in ai_text:
-            detected_category = "成長テーマ"
-        elif "マクロ" in ai_text or "地政学" in ai_text or "中東" in ai_text:
-            detected_category = "マクロ経済・地政学"
-        elif "為替" in ai_text or "金利" in ai_text or "円高" in ai_text or "円安" in ai_text or "日銀" in ai_text or "FRB" in ai_text:
-            detected_category = "為替・金利"
-        elif "不動産" in ai_text or "生活" in ai_text or "住宅" in ai_text:
-            detected_category = "不動産・生活"
-        
-        new_articles.append({
-            "title": title,
-            "link": link,
-            "summary": ai_text,
-            "category": detected_category,
-            "fetched_at": current_time_str
-        })
-        time.sleep(6) 
+            ai_results = json.loads(result_text.strip())
+            
+            # 元のニュースとAIの分析を合体
+            for res in ai_results:
+                idx = res.get("id")
+                if idx is not None and 0 <= idx < len(target_entries):
+                    entry = target_entries[idx]
+                    new_articles.append({
+                        "title": entry.title,
+                        "link": entry.link,
+                        "summary": res.get("summary", "要約なし"),
+                        "category": res.get("category", "その他"),
+                        "fetched_at": current_time_str
+                    })
     except Exception as e:
-        time.sleep(10)
+        print(f"Batch AI Error: {e}")
 
 news_data.extend(new_articles)
 filtered_news_data = []
@@ -130,9 +131,8 @@ for item in news_data:
 with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
 
-
-# --- 経済指標カレンダーのAIスクレイピング ---
-time.sleep(10) 
+# --- 経済指標カレンダーの取得 ---
+time.sleep(5) 
 
 schedule_result = "⚠️ データの取得に失敗しました。"
 
@@ -151,23 +151,22 @@ try:
     page_text_short = page_text[:8000]
 
     schedule_prompt = f"""
-    あなたは優秀な金融アシスタントです。以下のWebページのテキストデータから、
-    「本日の主な予定」と「NEWS（経済指標）」に関する情報を抽出し、
-    投資家向けに見やすく箇条書きでまとめてください。
-    余計な挨拶や説明は不要です。情報が見つからない場合は「本日の重要な予定はありません」と出力してください。
-    
-    【Webページのテキスト】
-    {page_text_short}
-    """
+あなたは優秀な金融アシスタントです。以下のWebページのテキストデータから、
+「本日の主な予定」と「NEWS（経済指標）」に関する情報を抽出し、投資家向けに見やすく箇条書きでまとめてください。
+余計な挨拶や説明は不要です。情報が見つからない場合は「本日の重要な予定はありません」と出力してください。
+
+【Webページのテキスト】
+{page_text_short}
+"""
     
     schedule_response = model.generate_content(schedule_prompt, safety_settings=safety_settings)
     if schedule_response.parts:
         schedule_result = schedule_response.text
     else:
-        schedule_result = "⚠️ AIが安全フィルターによりテキスト生成をブロックしました。"
+        schedule_result = "⚠️ AIが安全フィルターによりブロックしました。"
         
 except Exception as e:
-    schedule_result = f"⚠️ サイトの読み込みエラーが発生しました。理由: {e}"
+    schedule_result = f"⚠️ サイト読み込みエラー: {e}"
 
 with open("schedule_data.txt", "w", encoding="utf-8") as f:
     f.write(schedule_result)
