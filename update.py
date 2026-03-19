@@ -11,7 +11,6 @@ from bs4 import BeautifulSoup
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# 唯一無料で動く「2.5」を指定します
 model = genai.GenerativeModel("gemini-2.5-flash")
 
 DATA_FILE = "news_data.json"
@@ -68,7 +67,6 @@ safety_settings = [
 new_articles = []
 
 if target_entries:
-    # --- 【最強の解決策】15件のニュースを「1回の質問」にまとめてAIに投げる ---
     prompt = """
 あなたはプロの機関投資家です。以下の【ニュース一覧】を全て分析し、指定された【JSONフォーマット】で返してください。
 
@@ -92,7 +90,6 @@ if target_entries:
     try:
         response = model.generate_content(prompt, safety_settings=safety_settings)
         if response.parts:
-            # AIが返した文字列を整理して読み込む
             result_text = response.text.strip()
             if result_text.startswith("```json"):
                 result_text = result_text[7:]
@@ -101,7 +98,6 @@ if target_entries:
             
             ai_results = json.loads(result_text.strip())
             
-            # 元のニュースとAIの分析を合体
             for res in ai_results:
                 idx = res.get("id")
                 if idx is not None and 0 <= idx < len(target_entries):
@@ -131,10 +127,10 @@ for item in news_data:
 with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
 
-# --- 経済指標カレンダーの取得 ---
+# --- 経済指標カレンダーの取得（3分割JSON仕様） ---
 time.sleep(5) 
 
-schedule_result = "⚠️ データの取得に失敗しました。"
+schedule_result_json = {"schedule": "データ取得エラー", "indices": "データ取得エラー", "news": "データ取得エラー"}
 
 try:
     schedule_url = "https://nikkei225jp.com/schedule/"
@@ -151,9 +147,17 @@ try:
     page_text_short = page_text[:8000]
 
     schedule_prompt = f"""
-あなたは優秀な金融アシスタントです。以下のWebページのテキストデータから、
-「本日の主な予定」と「NEWS（経済指標）」に関する情報を抽出し、投資家向けに見やすく箇条書きでまとめてください。
-余計な挨拶や説明は不要です。情報が見つからない場合は「本日の重要な予定はありません」と出力してください。
+あなたは優秀な金融アシスタントです。以下のWebページのテキストデータから情報を抽出し、
+必ず以下の【JSONフォーマット】の形のみで出力してください。他の説明は一切不要です。
+
+【JSONフォーマット】
+{{
+  "schedule": "「今週の主な予定」と「本日の主な予定」を見やすく箇条書きで",
+  "indices": "「値上がり指数上位」と「値下がり指数上位」を見やすく箇条書きで",
+  "news": "「NEWS（経済指標）」を見やすく箇条書きで"
+}}
+
+※情報が見つからない項目は「データなし」としてください。
 
 【Webページのテキスト】
 {page_text_short}
@@ -161,12 +165,16 @@ try:
     
     schedule_response = model.generate_content(schedule_prompt, safety_settings=safety_settings)
     if schedule_response.parts:
-        schedule_result = schedule_response.text
-    else:
-        schedule_result = "⚠️ AIが安全フィルターによりブロックしました。"
+        res_text = schedule_response.text.strip()
+        if res_text.startswith("```json"):
+            res_text = res_text[7:]
+        if res_text.endswith("```"):
+            res_text = res_text[:-3]
+        schedule_result_json = json.loads(res_text.strip())
         
 except Exception as e:
-    schedule_result = f"⚠️ サイト読み込みエラー: {e}"
+    schedule_result_json = {"schedule": f"エラー: {e}", "indices": "エラー", "news": "エラー"}
 
-with open("schedule_data.txt", "w", encoding="utf-8") as f:
-    f.write(schedule_result)
+# 拡張子を .json にして保存
+with open("schedule_data.json", "w", encoding="utf-8") as f:
+    json.dump(schedule_result_json, f, ensure_ascii=False, indent=2)
