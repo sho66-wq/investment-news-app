@@ -80,7 +80,6 @@ if not news_data:
 else:
     st.success(f"📈 現在ストックされている有益な記事数: {len(news_data)}件")
     
-    # あなた専用の10カテゴリ
     categories = [
         "国内株・企業業績", "米国株・海外株", "日米金利・物価・為替", "世界経済・マクロ指標", 
         "国際情勢・地政学", "成長テーマ・新技術", "商品・暗号資産", 
@@ -89,8 +88,22 @@ else:
     
     results = {cat: [] for cat in categories}
     
+    # 【追加】古いカテゴリ名で保存された過去記事を、新しい10カテゴリに自動で振り分ける辞書
+    legacy_mapping = {
+        "株式・投資信託": "国内株・企業業績",
+        "マクロ経済・地政学": "国際情勢・地政学",
+        "為替・金利": "日米金利・物価・為替",
+        "不動産・生活": "生活・社会保障",
+        "成長テーマ": "成長テーマ・新技術"
+    }
+    
     for item in news_data:
         cat = item.get("category", "その他")
+        
+        # もし古い名札（cat）がついていたら、新しい名札に貼り替える！
+        if cat in legacy_mapping:
+            cat = legacy_mapping[cat]
+            
         if cat in results:
             results[cat].append(item)
         else:
