@@ -11,10 +11,20 @@ from bs4 import BeautifulSoup
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
 
+# 【超重要修正】1日20回制限の最新プレビュー版（2.5等）を避け、1日1500回使える「1.5-flash」を正確に探し出して指定する
 available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-preferred_models = ['models/gemini-2.5-flash', 'models/gemini-2.0-flash', 'models/gemini-1.5-flash']
-selected_model = next((pm for pm in preferred_models if pm in available_models), available_models[0] if available_models else None)
-model = genai.GenerativeModel(selected_model.replace("models/", ""))
+target_model_name = None
+for m in available_models:
+    if "1.5-flash" in m:
+        target_model_name = m
+        break
+
+# 万が一見つからない場合の保険
+if not target_model_name:
+    target_model_name = available_models[0]
+
+# 正確な名前でAIをセット（これで404エラーも回避）
+model = genai.GenerativeModel(target_model_name.replace("models/", ""))
 
 DATA_FILE = "news_data.json"
 try:
@@ -55,7 +65,7 @@ for url in rss_urls:
         pass
 
 random.shuffle(all_entries)
-# 【修正ポイント】1回の取得を15件に減らし、APIの制限を回避
+# 今回は安定して15件取得します
 target_entries = all_entries[:15]
 
 JST = timezone(timedelta(hours=+9), 'JST')
@@ -110,11 +120,11 @@ for entry in target_entries:
             "fetched_at": current_time_str
         })
         
-        # 【修正ポイント】1件ごとに「10秒」の深呼吸をさせてスピード違反を防ぐ
-        time.sleep(10) 
+        # 1.5モデルは1分間に15回までなので、6秒待機で確実にクリア
+        time.sleep(6) 
         
     except Exception as e:
-        time.sleep(15)
+        time.sleep(10)
 
 news_data.extend(new_articles)
 filtered_news_data = []
@@ -134,8 +144,7 @@ with open(DATA_FILE, "w", encoding="utf-8") as f:
 
 # --- 【追加任務】経済指標カレンダーのAIスクレイピング ---
 
-# 【修正ポイント】ニュース分析で疲れたAIを「20秒」休ませて制限をリセット
-time.sleep(20) 
+time.sleep(10) 
 
 schedule_result = "⚠️ データの取得に失敗しました。"
 
