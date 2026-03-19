@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 
 st.set_page_config(page_title="投資ニュースAI", page_icon="📈", layout="wide")
-st.title("投資ニュースAIまとめ (自動更新版)")
+st.title("投資ニュースAIまとめ　 (自動更新版)")
 st.write("裏方ロボットが定期的に収集・分析した最新の経済ニュースをストック表示しています。（直近3日間を保持）")
 
 DATA_FILE = "news_data.json"
