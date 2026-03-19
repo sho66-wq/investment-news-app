@@ -3,20 +3,38 @@ import json
 import os
 from datetime import datetime
 
-st.set_page_config(page_title="投資ニュースAI", page_icon="📈", layout="wide")
-st.title("投資ニュースAIまとめ　 (自動更新版)")
-st.write("裏方ロボットが定期的に収集・分析した最新の経済ニュースをストック表示しています。（直近3日間を保持）")
+# 画面全体を広く使う「wide」設定
+st.set_page_config(page_title="投資ニュースAIサマリー", page_icon="📈", layout="wide")
+st.title("📊 個人専用：投資ニュースAIサマリー (自動更新版) 🚀")
+st.write("裏方ロボットが定期的に収集・分析した最新の市場データと経済ニュースをストック表示しています。")
 
-# --- サイドバーに本日の予定・経済指標を表示 ---
-st.sidebar.header("📅 本日の主な予定・経済指標")
-if os.path.exists("schedule_data.txt"):
-    with open("schedule_data.txt", "r", encoding="utf-8") as f:
-        schedule_text = f.read()
-    st.sidebar.info(schedule_text)
+# --- 上段：市場データ・予定（広く3列で表示） ---
+st.subheader("📅 本日の市場データ・予定")
+SCHEDULE_FILE = "schedule_data.json"
+
+if os.path.exists(SCHEDULE_FILE):
+    try:
+        with open(SCHEDULE_FILE, "r", encoding="utf-8") as f:
+            sched_data = json.load(f)
+            
+        # ここで画面を3つの列（カラム）に分割！
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.info(f"**🗓️ 主な予定**\n\n{sched_data.get('schedule', 'データなし')}")
+        with col2:
+            st.success(f"**📈 指数ランキング**\n\n{sched_data.get('indices', 'データなし')}")
+        with col3:
+            st.warning(f"**📰 NEWS（経済指標）**\n\n{sched_data.get('news', 'データなし')}")
+            
+    except Exception:
+        st.error("スケジュールの読み込みに失敗しました。")
 else:
-    st.sidebar.write("現在データ収集中です...")
-# ---------------------------------------------
+    st.write("現在、市場データを収集中です...")
 
+st.divider()
+
+# --- 下段：AIニュース分析 ---
 DATA_FILE = "news_data.json"
 news_data = []
 
@@ -24,13 +42,12 @@ if os.path.exists(DATA_FILE):
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         try:
             news_data = json.load(f)
-            # データを「取得日時」の新しい順に並び替える
             news_data.sort(key=lambda x: x.get("fetched_at", ""), reverse=True)
         except Exception:
             pass
 
 if not news_data:
-    st.warning("⏳ 現在表示できるニュースがありません。裏方ロボットが初回のデータ収集を終えるまで数分お待ちください。")
+    st.warning("⏳ 現在表示できるニュースがありません。")
 else:
     st.success(f"📈 現在ストックされている有益な記事数: {len(news_data)}件")
     
@@ -54,14 +71,12 @@ else:
                 for item in results[cat]:
                     st.subheader(f"📰 {item['title']}")
                     
-                    # 取得日時のフォーマット
                     try:
                         dt = datetime.fromisoformat(item['fetched_at'])
                         formatted_time = dt.strftime("%Y/%m/%d %H:%M")
                     except Exception:
                         formatted_time = "不明"
 
-                    # 【追加機能】URLから配信元サイトを自動判定する
                     link = item.get('link', '')
                     if 'yahoo.co.jp' in link:
                         source = "Yahoo!ニュース"
@@ -74,7 +89,6 @@ else:
                     else:
                         source = "外部ニュースサイト"
                         
-                    # 配信元（🏢）を追加して表示
                     st.caption(f"🏢 配信元: **{source}** | ⏱ 取得日時: {formatted_time} | [🔗 元記事を読む]({link})")
                     st.info(item['summary'])
                     st.divider()
