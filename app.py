@@ -14,10 +14,8 @@ if os.path.exists(DATA_FILE):
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         try:
             news_data = json.load(f)
-            
-            # 【ここが魔法の1行！】データを「取得日時（fetched_at）」の新しい順に並び替える
+            # データを「取得日時」の新しい順に並び替える
             news_data.sort(key=lambda x: x.get("fetched_at", ""), reverse=True)
-            
         except Exception:
             pass
 
@@ -46,12 +44,27 @@ else:
                 for item in results[cat]:
                     st.subheader(f"📰 {item['title']}")
                     
+                    # 取得日時のフォーマット
                     try:
                         dt = datetime.fromisoformat(item['fetched_at'])
                         formatted_time = dt.strftime("%Y/%m/%d %H:%M")
                     except Exception:
                         formatted_time = "不明"
+
+                    # 【追加機能】URLから配信元サイトを自動判定する
+                    link = item.get('link', '')
+                    if 'yahoo.co.jp' in link:
+                        source = "Yahoo!ニュース"
+                    elif 'nhk.or.jp' in link:
+                        source = "NHKニュース"
+                    elif 'rakuten-sec.net' in link:
+                        source = "トウシル (楽天証券)"
+                    elif 'google' in link:
+                        source = "Googleニュース"
+                    else:
+                        source = "外部ニュースサイト"
                         
-                    st.caption(f"⏱ 取得日時: {formatted_time} | [🔗 元記事を読む]({item['link']})")
+                    # 配信元（🏢）を追加して表示
+                    st.caption(f"🏢 配信元: **{source}** | ⏱ 取得日時: {formatted_time} | [🔗 元記事を読む]({link})")
                     st.info(item['summary'])
                     st.divider()
