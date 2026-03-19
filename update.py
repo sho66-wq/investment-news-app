@@ -149,4 +149,132 @@ for sym, name in symbols.items():
             prev_close = hist['Close'].iloc[-2]
             current = hist['Close'].iloc[-1]
             change = current - prev_close
-            change_pct = (change /
+            change_pct = (change / prev_close) * 100
+            
+            if change_pct > 0:
+                arrow = f":green[↑ +{change_pct:.2f}%]"
+            elif change_pct < 0:
+                arrow = f":red[↓ {change_pct:.2f}%]"
+            else:
+                arrow = "±0.00%"
+                
+            price_str = f"{current:.2f}" if current < 1000 else f"{current:,.2f}"
+            display_lines[name] = f"- **:blue[{name}]**: {price_str} ({arrow})\n"
+        else:
+            display_lines[name] = f"- **:blue[{name}]**: 取得不可\n"
+    except Exception:
+        display_lines[name] = f"- **:blue[{name}]**: 取得不可\n"
+
+try:
+    url_topix = "https://finance.yahoo.co.jp/quote/998405.O"
+    url_jgb = "https://finance.yahoo.co.jp/quote/035240069.FX"
+    headers_yf = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+    
+    res_t = requests.get(url_topix, headers=headers_yf, timeout=10)
+    soup_t = BeautifulSoup(res_t.text, "html.parser")
+    for s in soup_t(["script", "style"]): s.extract()
+    text_t = soup_t.get_text(separator=' ', strip=True)[:3000]
+    
+    res_j = requests.get(url_jgb, headers=headers_yf, timeout=10)
+    soup_j = BeautifulSoup(res_j.text, "html.parser")
+    for s in soup_j(["script", "style"]): s.extract()
+    text_j = soup_j.get_text(separator=' ', strip=True)[:3000]
+
+    prompt_missing = f"""
+    あなたはデータ抽出AIです。以下の2つのWebページから、TOPIXと日本国債10年利回りの「最新価格」と「前日比」を抽出してください。
+    【ページ1（TOPIX）】\n{text_t}
+    【ページ2（日本国債）】\n{text_j}
+    必ず以下のJSONフォーマットで返してください。プラスの場合は+を、マイナスの場合は-をつけてください。
+    {{
+      "topix_price": "価格の数字のみ",
+      "topix_change": "前日比の数字のみ（例: +10.50）",
+      "jgb_price": "利回りの数字のみ（例: 0.750）",
+      "jgb_change": "前日比の数字のみ（例: -0.010）"
+    }}
+    """
+    response_missing = model.generate_content(
+        prompt_missing, 
+        safety_settings=safety_settings,
+        generation_config={"response_mime_type": "application/json"}
+    )
+    if response_missing.parts:
+        data_m = json.loads(response_missing.text)
+        
+        tp = data_m.get("topix_price", "")
+        tc = data_m.get("topix_change", "")
+        if tp and tc and "取得" not in tp:
+            arr_t = f":green[↑ {tc}]" if "+" in tc else (f":red[↓ {tc}]" if "-" in tc else "±0")
+            display_lines["日本TOPIX"] = f"- **:blue[日本TOPIX]**: {tp} ({arr_t})\n"
+        else:
+            display_lines["日本TOPIX"] = f"- **:blue[日本TOPIX]**: 取得不可\n"
+            
+        jp = data_m.get("jgb_price", "")
+        jc = data_m.get("jgb_change", "")
+        if jp and jc and "取得" not in jp:
+            arr_j = f":green[↑ {jc}%]" if "+" in jc else (f":red[↓ {jc}%]" if "-" in jc else "±0%")
+            if "%" not in jp: jp += "%"
+            display_lines["日本国債10年利回り"] = f"- **:blue[日本国債10年利回り]**: {jp} ({arr_j})\n"
+        else:
+            display_lines["日本国債10年利回り"] = f"- **:blue[日本国債10年利回り]**: 取得不可\n"
+except Exception as e:
+    display_lines["日本TOPIX"] = f"- **:blue[日本TOPIX]**: 取得不可\n"
+    display_lines["日本国債10年利回り"] = f"- **:blue[日本国債10年利回り]**: 取得不可\n"
+
+order = [
+    "日本日経平均", "日経先物", "日本TOPIX", "日本国債10年利回り",
+    "為替 ドル円", "為替 ユーロ円", "米国NYダウ", "VIX恐怖指数",
+    "日経VI", "WTI原油先物", "NY金先物", "ビットコイン"
+]
+indices_text = "".join([display_lines.get(k, f"- **:blue[{k}]**: 取得不可\n") for k in order])
+indices_text += "\n*(データ取得元: Yahoo Finance / Yahoo!ファイナンス)*\n"
+
+
+# --- スケジュールとみんかぶのAIスクレイピング ---
+time.sleep(5) 
+schedule_result_json = {"schedule": "エラー", "indices": indices_text, "news": "エラー", "contribution": "エラー"}
+
+try:
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    res_sched = requests.get("https://nikkei225jp.com/schedule/", headers=headers, timeout=15)
+    res_sched.encoding = res_sched.apparent_encoding
+    soup_sched = BeautifulSoup(res_sched.text, "html.parser")
+    for script in soup_sched(["script", "style"]):
+        script.extract()
+    text_sched = soup_sched.get_text(separator=' ', strip=True)[:15000]
+
+    res_min = requests.get("https://fu.minkabu.jp/chart/nikkei225/contribution", headers=headers, timeout=15)
+    res_min.encoding = res_min.apparent_encoding
+    soup_min = BeautifulSoup(res_min.text, "html.parser")
+    for script in soup_min(["script", "style"]):
+        script.extract()
+    text_min = soup_min.get_text(separator=' ', strip=True)[:15000]
+
+    schedule_prompt = f"""
+あなたは金融アシスタントです。以下の2つのWebページから情報を抽出し、必ず指定のJSON形式で出力してください。
+各値は配列や辞書にせず、必ず1つの長い文字列にしてください。箇条書きは「- 」と改行「\\n」を使ってください。
+
+{{
+  "schedule": "【ページ1】から今週と本日の主な予定を抜粋（日付は ### で大きく）",
+  "news": "【ページ1】からNEWS（経済指標）を抜粋（日付は ### で大きく）",
+  "contribution": "【ページ2】から日経225の値上がり数・値下がり数、および寄与度上位・下位TOP10を箇条書きで"
+}}
+
+【ページ1：スケジュール】\n{text_sched}
+\n---\n
+【ページ2：みんかぶ寄与度】\n{text_min}
+"""
+    schedule_response = model.generate_content(
+        schedule_prompt, 
+        safety_settings=safety_settings,
+        generation_config={"response_mime_type": "application/json"}
+    )
+    if schedule_response.parts:
+        ai_data = json.loads(schedule_response.text)
+        schedule_result_json["schedule"] = ai_data.get("schedule", "取得エラー")
+        schedule_result_json["news"] = ai_data.get("news", "取得エラー")
+        schedule_result_json["contribution"] = ai_data.get("contribution", "取得エラー")
+except Exception as e:
+    pass
+
+with open("schedule_data.json", "w", encoding="utf-8") as f:
+    json.dump(schedule_result_json, f, ensure_ascii=False, indent=2)
