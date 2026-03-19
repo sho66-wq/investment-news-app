@@ -32,6 +32,7 @@ jobs:
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add .news_data.json
+        git add . news_data.json
+      
         # 変更があった場合のみ保存する
         git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update news data" && git push)
