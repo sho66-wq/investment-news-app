@@ -3,12 +3,11 @@ import json
 import os
 from datetime import datetime
 
-# 画面全体を広く使う「wide」設定
 st.set_page_config(page_title="投資ニュースAIサマリー", page_icon="📈", layout="wide")
 st.title("📊 個人専用：投資ニュースAIサマリー (自動更新版) 🚀")
 st.write("裏方ロボットが定期的に収集・分析した最新の市場データと経済ニュースをストック表示しています。")
 
-# --- 上段：市場データ・予定（広く3列で表示） ---
+# --- 上段：市場データ・予定（広く、見やすい枠線デザイン） ---
 st.subheader("📅 本日の市場データ・予定")
 SCHEDULE_FILE = "schedule_data.json"
 
@@ -17,15 +16,33 @@ if os.path.exists(SCHEDULE_FILE):
         with open(SCHEDULE_FILE, "r", encoding="utf-8") as f:
             sched_data = json.load(f)
             
-        # ここで画面を3つの列（カラム）に分割！
+        # 3列のレイアウト
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.info(f"**🗓️ 主な予定**\n\n{sched_data.get('schedule', 'データなし')}")
+            with st.container(border=True):
+                st.markdown("#### 🗓️ 主な予定")
+                st.markdown(sched_data.get('schedule', 'データなし'))
+                
         with col2:
-            st.success(f"**📈 指数ランキング**\n\n{sched_data.get('indices', 'データなし')}")
+            with st.container(border=True):
+                st.markdown("#### 📈 指定12指数・為替")
+                st.markdown(sched_data.get('indices', 'データなし'))
+                
         with col3:
-            st.warning(f"**📰 NEWS（経済指標）**\n\n{sched_data.get('news', 'データなし')}")
+            with st.container(border=True):
+                st.markdown("#### 📰 NEWS（経済指標）")
+                st.markdown(sched_data.get('news', 'データなし'))
+
+        # --- 新設：日経225内部データ（騰落・寄与度） ---
+        st.subheader("🔍 日経225 内部データ（騰落数・寄与度）")
+        with st.container(border=True):
+            st.markdown(sched_data.get('contribution', '現在データ収集中です...'))
+            
+            # ヒートマップへの導線ボタン
+            st.caption("※TOP50銘柄や、ヒートマップ（面積グラフ）などのさらに詳細な情報は以下のリンクから確認できます。")
+            st.link_button("📊 みんかぶ（全銘柄寄与度）を開く", "https://fu.minkabu.jp/chart/nikkei225/contribution", use_container_width=True)
+            st.link_button("🗺️ 日経平均ヒートマップを開く", "https://nikkei225jp.com/chart/nikkei.php", use_container_width=True)
             
     except Exception:
         st.error("スケジュールの読み込みに失敗しました。")
