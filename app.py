@@ -80,14 +80,13 @@ if not news_data:
 else:
     st.success(f"📈 現在ストックされている有益な記事数: {len(news_data)}件")
     
-    # 【追加】あなた専用の10カテゴリ
+    # あなた専用の10カテゴリ
     categories = [
         "国内株・企業業績", "米国株・海外株", "日米金利・物価・為替", "世界経済・マクロ指標", 
         "国際情勢・地政学", "成長テーマ・新技術", "商品・暗号資産", 
         "不動産・住宅市場", "生活・社会保障", "その他"
     ]
     
-    # 【修正】消えてしまっていた「箱」を確実に用意！
     results = {cat: [] for cat in categories}
     
     for item in news_data:
@@ -108,4 +107,23 @@ else:
                     st.subheader(f"📰 {item['title']}")
                     
                     try:
-                        dt = datetime.fromisoformat(item['fetched
+                        dt = datetime.fromisoformat(item['fetched_at'])
+                        formatted_time = dt.strftime("%Y/%m/%d %H:%M")
+                    except Exception:
+                        formatted_time = "不明"
+
+                    link = item.get('link', '')
+                    if 'yahoo.co.jp' in link:
+                        source = "Yahoo!ニュース"
+                    elif 'nhk.or.jp' in link:
+                        source = "NHKニュース"
+                    elif 'rakuten-sec.net' in link:
+                        source = "トウシル (楽天証券)"
+                    elif 'google' in link:
+                        source = "Googleニュース"
+                    else:
+                        source = "外部ニュースサイト"
+                        
+                    st.caption(f"🏢 配信元: **{source}** | ⏱ 取得日時: {formatted_time} | [🔗 元記事を読む]({link})")
+                    st.info(item['summary'])
+                    st.divider()
