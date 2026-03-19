@@ -127,40 +127,62 @@ for item in news_data:
 with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
 
-# --- 経済指標カレンダーの取得（3分割JSON仕様） ---
+
+# --- 経済指標カレンダー＆主要指数＆みんかぶ寄与度のAIスクレイピング ---
 time.sleep(5) 
 
-schedule_result_json = {"schedule": "データ取得エラー", "indices": "データ取得エラー", "news": "データ取得エラー"}
+schedule_result_json = {"schedule": "エラー", "indices": "エラー", "news": "エラー", "contribution": "エラー"}
 
 try:
-    schedule_url = "https://nikkei225jp.com/schedule/"
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
-    res = requests.get(schedule_url, headers=headers, timeout=15)
-    res.encoding = res.apparent_encoding
-    soup = BeautifulSoup(res.text, "html.parser")
     
-    for script in soup(["script", "style"]):
+    # ① スケジュールページ
+    res_sched = requests.get("https://nikkei225jp.com/schedule/", headers=headers, timeout=15)
+    res_sched.encoding = res_sched.apparent_encoding
+    soup_sched = BeautifulSoup(res_sched.text, "html.parser")
+    for script in soup_sched(["script", "style"]):
         script.extract()
-    page_text = soup.get_text(separator='\n')
-    page_text_short = page_text[:8000]
+    text_sched = soup_sched.get_text(separator='\n')[:6000]
+
+    # ② トップページ（主要12指数用）
+    res_top = requests.get("https://nikkei225jp.com/", headers=headers, timeout=15)
+    res_top.encoding = res_top.apparent_encoding
+    soup_top = BeautifulSoup(res_top.text, "html.parser")
+    for script in soup_top(["script", "style"]):
+        script.extract()
+    text_top = soup_top.get_text(separator='\n')[:6000]
+
+    # ③ みんかぶページ（寄与度・騰落数用）
+    res_min = requests.get("https://fu.minkabu.jp/chart/nikkei225/contribution", headers=headers, timeout=15)
+    res_min.encoding = res_min.apparent_encoding
+    soup_min = BeautifulSoup(res_min.text, "html.parser")
+    for script in soup_min(["script", "style"]):
+        script.extract()
+    # 銘柄名が多いので多めに切り取る
+    text_min = soup_min.get_text(separator='\n')[:10000]
 
     schedule_prompt = f"""
-あなたは優秀な金融アシスタントです。以下のWebページのテキストデータから情報を抽出し、
-必ず以下の【JSONフォーマット】の形のみで出力してください。他の説明は一切不要です。
+あなたは優秀な金融アシスタントです。以下の3つのWebページデータから情報を抽出し、
+必ず以下の【JSONフォーマット】の形のみで出力してください。
+
+【🚨 重要なデザインルール】
+見出しや強調したい箇所にはMarkdown（### や **太字**）を使ってください。
 
 【JSONフォーマット】
 {{
-  "schedule": "「今週の主な予定」と「本日の主な予定」を見やすく箇条書きで",
-  "indices": "「値上がり指数上位」と「値下がり指数上位」を見やすく箇条書きで",
-  "news": "「NEWS（経済指標）」を見やすく箇条書きで"
+  "schedule": "【ページ1】から「今週の主な予定」と「本日の主な予定」を見やすく箇条書きで（日付は ### で大きく）",
+  "indices": "【ページ2】から以下の12項目の最新値を抽出して箇条書きで（日本日経平均、日経先物、日本TOPIX、日本国債10年利回、為替ドル円、為替 ユーロ円、米国NYダウ、VIX恐怖指数、日経VI、WTI原油先物、NY金先物、ビットコイン）",
+  "news": "【ページ1】から「NEWS（経済指標）」を見やすく箇条書きで（日付は ### で大きく）",
+  "contribution": "【ページ3】から「日経225銘柄数集計（値上がり数、値下がり数）」と、「値上がり寄与上位」「値下がり寄与上位」をそれぞれ【TOP10銘柄まで】抜粋して箇条書きで見やすく（TOP50だと長すぎるため）"
 }}
 
-※情報が見つからない項目は「データなし」としてください。
-
-【Webページのテキスト】
-{page_text_short}
+【ページ1：スケジュール】\n{text_sched}
+\n---\n
+【ページ2：トップページ】\n{text_top}
+\n---\n
+【ページ3：みんかぶ寄与度】\n{text_min}
 """
     
     schedule_response = model.generate_content(schedule_prompt, safety_settings=safety_settings)
@@ -173,8 +195,7 @@ try:
         schedule_result_json = json.loads(res_text.strip())
         
 except Exception as e:
-    schedule_result_json = {"schedule": f"エラー: {e}", "indices": "エラー", "news": "エラー"}
+    schedule_result_json = {"schedule": f"エラー: {e}", "indices": "エラー", "news": "エラー", "contribution": f"エラー: {e}"}
 
-# 拡張子を .json にして保存
 with open("schedule_data.json", "w", encoding="utf-8") as f:
     json.dump(schedule_result_json, f, ensure_ascii=False, indent=2)
