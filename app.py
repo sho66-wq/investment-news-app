@@ -3,6 +3,7 @@ import json
 import os
 from datetime import datetime
 import ast
+import streamlit.components.v1 as components  # TradingView埋め込みに必要
 
 def clean_text(text):
     if not isinstance(text, str):
@@ -19,7 +20,7 @@ def clean_text(text):
 
 st.set_page_config(page_title="投資ニュースAIサマリー", page_icon="📈", layout="wide")
 st.title("📊 個人専用：投資ニュースAIサマリー (自動更新版) 🚀")
-st.write("裏方ロボットが定期的に収集・分析した最新の市場データと経済ニュースをストック表示しています。")
+st.write("裏方ロボットが集めたニュースと、TradingViewのリアルタイム市況（20分遅れ含む）を表示しています。")
 
 # --- 上段：市場データ・予定 ---
 st.subheader("📅 本日の市場データ・予定")
@@ -30,7 +31,8 @@ if os.path.exists(SCHEDULE_FILE):
         with open(SCHEDULE_FILE, "r", encoding="utf-8") as f:
             sched_data = json.load(f)
             
-        col1, col2, col3 = st.columns(3)
+        # カラムの幅を微調整（真ん中の TradingViewボードを少し広く）
+        col1, col2, col3 = st.columns([1, 1.8, 1])
         
         with col1:
             with st.container(border=True):
@@ -39,8 +41,55 @@ if os.path.exists(SCHEDULE_FILE):
                 
         with col2:
             with st.container(border=True):
-                st.markdown("#### 📈 指定12指数・為替")
-                st.markdown(sched_data.get('indices', 'データなし'))
+                st.markdown("#### 📈 リアルタイム市況 (TradingView)")
+                
+                # 【裏技】TradingView の Market Overview ウィジェットを HTML/JS で埋め込み
+                # 指定した12個の主要指標をタブ切り替えで表示します
+                tradingview_html = """
+                <div class="tradingview-widget-container">
+                  <div class="tradingview-widget-container__widget"></div>
+                  <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js" async>
+                  {
+                  "colorTheme": "light",
+                  "dateRange": "12M",
+                  "showChart": true,
+                  "locale": "ja",
+                  "width": "100%",
+                  "height": 550,
+                  "largeChartUrl": "",
+                  "isTransparent": false,
+                  "showSymbolLogo": true,
+                  "showFloatingTooltip": false,
+                  "tabs": [
+                    {
+                      "title": "日本市場",
+                      "symbols": [
+                        { "proName": "OSE:NI2251!", "title": "日経平均先物" },
+                        { "proName": "TSE:TOPIX", "title": "TOPIX" },
+                        { "proName": "TVC:JP10Y", "title": "日本国債10年利回り" },
+                        { "proName": "CAPITALCOM:VIXNK", "title": "日経VI" }
+                      ]
+                    },
+                    {
+                      "title": "為替・米国・商品",
+                      "symbols": [
+                        { "proName": "FX:USDJPY", "title": "ドル/円" },
+                        { "proName": "FX:EURJPY", "title": "ユーロ/円" },
+                        { "proName": "CBOT:YM1!", "title": "NYダウ先物" },
+                        { "proName": "CME_MINI:ES1!", "title": "S&P500先物" },
+                        { "proName": "CME:NQ1!", "title": "ナスダック先物" },
+                        { "proName": "NYMEX:CL1!", "title": "WTI原油先物" },
+                        { "proName": "COMEX:GC1!", "title": "NY金先物" },
+                        { "proName": "BITSTAMP:BTCJPY", "title": "ビットコイン" }
+                      ]
+                    }
+                  ]
+                }
+                  </script>
+                </div>
+                """
+                # Streamlitの中にHTMLを表示させる（高さはウィジェットに合わせて微調整）
+                components.html(tradingview_html, height=560)
                 
         with col3:
             with st.container(border=True):
@@ -71,6 +120,7 @@ if os.path.exists(DATA_FILE):
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         try:
             news_data = json.load(f)
+            #fetched_at で降順ソート
             news_data.sort(key=lambda x: x.get("fetched_at", ""), reverse=True)
         except Exception:
             pass
