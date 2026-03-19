@@ -11,7 +11,11 @@ from bs4 import BeautifulSoup
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
 
-model = genai.GenerativeModel("gemini-1.5-flash")
+# 【ここが修正ポイント！】古い「1.5」で決め打ちせず、今使える最新のFlashモデルを自動で探す
+available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+preferred_models = ['models/gemini-2.5-flash', 'models/gemini-2.0-flash', 'models/gemini-1.5-flash']
+selected_model = next((pm for pm in preferred_models if pm in available_models), available_models[0] if available_models else None)
+model = genai.GenerativeModel(selected_model.replace("models/", ""))
 
 DATA_FILE = "news_data.json"
 try:
@@ -126,14 +130,12 @@ with open(DATA_FILE, "w", encoding="utf-8") as f:
 
 
 # --- 【追加任務】経済指標カレンダーのAIスクレイピング ---
-time.sleep(5) # AIの息継ぎ
+time.sleep(5) 
 
-# 初期値を設定（エラーになってもこれをファイルに書き込む）
 schedule_result = "⚠️ データの取得に失敗しました。"
 
 try:
     schedule_url = "https://nikkei225jp.com/schedule/"
-    # より人間に近いブラウザのフリをする（ブロック対策）
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
@@ -165,6 +167,5 @@ try:
 except Exception as e:
     schedule_result = f"⚠️ サイトの読み込みエラーが発生しました。理由: {e}"
 
-# どんな結果（成功でもエラーでも）になっても絶対にファイルを作る
 with open("schedule_data.txt", "w", encoding="utf-8") as f:
     f.write(schedule_result)
