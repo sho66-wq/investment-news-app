@@ -134,10 +134,10 @@ with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
 
 
-# --- 【無敵の3段構え】指数の取得 ---
-display_lines = {}
+# --- 【100点仕様】指数を「テキスト」ではなく「データ（辞書）」として抽出 ---
+indices_data = {}
 
-# 1段目：yfinance で取得できる主要指標
+# 1段目：yfinance
 symbols = {
     "^N225": "日本日経平均",
     "NIY=F": "日経先物",
@@ -160,27 +160,17 @@ for sym, name in symbols.items():
             change = current - prev_close
             change_pct = (change / prev_close) * 100
             
-            if change_pct > 0:
-                arrow = f":green[↑ +{change_pct:.2f}%]"
-            elif change_pct < 0:
-                arrow = f":red[↓ {change_pct:.2f}%]"
-            else:
-                arrow = "±0.00%"
-                
             price_str = f"{current:.2f}" if current < 1000 else f"{current:,.2f}"
-            display_lines[name] = f"- **:blue[{name}]**: {price_str} ({arrow})\n"
-        else:
-            display_lines[name] = f"- **:blue[{name}]**: 取得不可\n"
+            # 変動値（%）と価格を別々にデータとして保存する
+            indices_data[name] = {"price": price_str, "change": f"{change_pct:.2f}%"}
     except Exception:
-        display_lines[name] = f"- **:blue[{name}]**: 取得不可\n"
+        pass
 
-# 2段目：日本国債10年利回り（財務省のCSVから、絶対にエラーにならないように最新数字を探す）
+# 2段目：日本国債10年利回り（財務省から計算）
 try:
     res = requests.get('https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv', timeout=10)
     res.encoding = 'shift_jis'
-    # 空行を消し、コンマで分割
     lines = [line.split(',') for line in res.text.strip().split('\n') if line]
-    # 列が十分にあり、かつ10年利回りの列にちゃんと数字が入っている行だけを抽出
     valid_lines = [l for l in lines if len(l) >= 11 and l[10].replace('.', '', 1).isdigit()]
     
     if len(valid_lines) >= 2:
@@ -191,90 +181,70 @@ try:
         jgb_prev_val = float(prev[10])
         change = jgb_latest_val - jgb_prev_val
         
-        if change > 0:
-            arrow = f":green[↑ +{change:.3f}%]"
-        elif change < 0:
-            arrow = f":red[↓ {change:.3f}%]"
-        else:
-            arrow = "±0.00%"
-            
-        display_lines["日本国債10年利回り"] = f"- **:blue[日本国債10年利回り]**: {jgb_latest_val:.3f}% ({arrow})\n"
-    else:
-        display_lines["日本国債10年利回り"] = f"- **:blue[日本国債10年利回り]**: 取得不可\n"
-except Exception as e:
-    display_lines["日本国債10年利回り"] = f"- **:blue[日本国債10年利回り]**: 取得不可\n"
+        indices_data["日本国債10年利回り"] = {"price": f"{jgb_latest_val:.3f}%", "change": f"{change:.3f}pt"}
+except Exception:
+    pass
 
-# 3段目：TOPIX と 日経VI（成功実績のあるYahooファイナンス日本版から抽出）
-try:
-    headers_yf = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-    
-    # TOPIX
-    res_t = requests.get("https://finance.yahoo.co.jp/quote/998405.O", headers=headers_yf, timeout=10)
-    soup_t = BeautifulSoup(res_t.text, "html.parser")
-    for s in soup_t(["script", "style"]): s.extract()
-    text_t = soup_t.get_text(separator=' ', strip=True)[:3000]
-    
-    # 日経VI
-    res_v = requests.get("https://finance.yahoo.co.jp/quote/998407.O", headers=headers_yf, timeout=10)
-    soup_v = BeautifulSoup(res_v.text, "html.parser")
-    for s in soup_v(["script", "style"]): s.extract()
-    text_v = soup_v.get_text(separator=' ', strip=True)[:3000]
-
-    prompt_missing = f"""
-    あなたはデータ抽出AIです。以下の2つのWebページから、「最新価格」と「前日比」を抽出してください。
-    【ページ1（TOPIX）】\n{text_t}
-    【ページ2（日経VI）】\n{text_v}
-    必ず以下のJSONフォーマットで返してください。プラスの場合は+を、マイナスの場合は-をつけてください。
-    {{
-      "topix_price": "価格の数字のみ",
-      "topix_change": "前日比の数字のみ（例: +10.50）",
-      "vi_price": "価格の数字のみ（例: 25.40）",
-      "vi_change": "前日比の数字のみ（例: -1.20）"
-    }}
-    """
-    response_missing = model.generate_content(
-        prompt_missing, 
-        safety_settings=safety_settings,
-        generation_config={"response_mime_type": "application/json"}
-    )
-    if response_missing.parts:
-        data_m = json.loads(response_missing.text)
+# 3段目：Google Financeからの物理スクレイピング（日経VI、TOPIX）
+def scrape_google_finance(ticker, exchange):
+    url = f"https://www.google.com/finance/quote/{ticker}:{exchange}"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    try:
+        res = requests.get(url, headers=headers, timeout=5)
+        soup = BeautifulSoup(res.text, "html.parser")
         
-        # TOPIX
-        tp = data_m.get("topix_price", "")
-        tc = data_m.get("topix_change", "")
-        if tp and tc and "取得" not in tp:
-            arr_t = f":green[↑ {tc}]" if "+" in tc else (f":red[↓ {tc}]" if "-" in tc else f"({tc})")
-            display_lines["日本TOPIX"] = f"- **:blue[日本TOPIX]**: {tp} ({arr_t})\n"
-        else:
-            display_lines["日本TOPIX"] = f"- **:blue[日本TOPIX]**: 取得不可\n"
-            
-        # 日経VI
-        vp = data_m.get("vi_price", "")
-        vc = data_m.get("vi_change", "")
-        if vp and vc and "取得" not in vp:
-            arr_v = f":green[↑ {vc}]" if "+" in vc else (f":red[↓ {vc}]" if "-" in vc else f"({vc})")
-            display_lines["日経VI"] = f"- **:blue[日経VI]**: {vp} ({arr_v})\n"
-        else:
-            display_lines["日経VI"] = f"- **:blue[日経VI]**: 取得不可\n"
-except Exception as e:
-    display_lines["日本TOPIX"] = f"- **:blue[日本TOPIX]**: 取得不可\n"
-    display_lines["日経VI"] = f"- **:blue[日経VI]**: 取得不可\n"
+        price_tag = soup.find(class_="YMlKec fxKbKc")
+        if not price_tag: return None, None
+        price = price_tag.text.strip()
+        
+        change_tag = soup.find(class_="JwB6zf")
+        change = change_tag.text.strip() if change_tag else ""
+        return price, change
+    except:
+        return None, None
 
+gf_mapping = {
+    "日本TOPIX": ("TOPIX", "INDEXTKY"),
+    "日経VI": ("NI225VIX", "INDEXNIK"),
+}
 
-# ご指定の順番通りに綺麗に並べる
-order = [
-    "日本日経平均", "日経先物", "日本TOPIX", "日本国債10年利回り",
-    "為替 ドル円", "為替 ユーロ円", "米国NYダウ", "VIX恐怖指数",
-    "日経VI", "WTI原油先物", "NY金先物", "ビットコイン"
-]
-indices_text = "".join([display_lines.get(k, f"- **:blue[{k}]**: 取得不可\n") for k in order])
-indices_text += "\n*(データ取得元: [Yahoo Finance](https://finance.yahoo.co.jp/) / [財務省](https://www.mof.go.jp/))*\n"
+for name, (ticker, exch) in gf_mapping.items():
+    if name not in indices_data:
+        p, c = scrape_google_finance(ticker, exch)
+        if p and c:
+            indices_data[name] = {"price": p, "change": c}
 
 
 # --- スケジュールとみんかぶのAIスクレイピング ---
 time.sleep(5) 
-schedule_result_json = {"schedule": "エラー", "indices": indices_text, "news": "エラー", "contribution": "エラー"}
+
+# 前回保存された過去のデータを読み込む（失敗時の保険）
+schedule_result_json = {
+    "schedule": "現在データを収集中です...", 
+    "indices": indices_data, # ← ここがテキストではなくデータ構造になっています
+    "news": "現在データを収集中です...", 
+    "contribution": "現在データを収集中です..."
+}
+
+if os.path.exists("schedule_data.json"):
+    try:
+        with open("schedule_data.json", "r", encoding="utf-8") as f:
+            old_data = json.load(f)
+            schedule_result_json["schedule"] = old_data.get("schedule", schedule_result_json["schedule"])
+            schedule_result_json["news"] = old_data.get("news", schedule_result_json["news"])
+            schedule_result_json["contribution"] = old_data.get("contribution", schedule_result_json["contribution"])
+            
+            # 【重要防御網】もし今回取得に失敗した指数があれば、前回のデータを引き継ぐ！
+            old_indices = old_data.get("indices", {})
+            if isinstance(old_indices, dict):
+                for key, val in old_indices.items():
+                    if key not in indices_data:
+                        indices_data[key] = val
+                        indices_data[key]["price"] = f"{val['price']} (※)" # 古いデータには(※)をつける
+    except:
+        pass
+
+schedule_result_json["indices"] = indices_data
 
 try:
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -311,11 +281,13 @@ try:
         safety_settings=safety_settings,
         generation_config={"response_mime_type": "application/json"}
     )
+    
     if schedule_response.parts:
         ai_data = json.loads(schedule_response.text)
-        schedule_result_json["schedule"] = ai_data.get("schedule", "取得エラー")
-        schedule_result_json["news"] = ai_data.get("news", "取得エラー")
-        schedule_result_json["contribution"] = ai_data.get("contribution", "取得エラー")
+        schedule_result_json["schedule"] = ai_data.get("schedule", schedule_result_json["schedule"])
+        schedule_result_json["news"] = ai_data.get("news", schedule_result_json["news"])
+        schedule_result_json["contribution"] = ai_data.get("contribution", schedule_result_json["contribution"])
+        
 except Exception as e:
     pass
 
