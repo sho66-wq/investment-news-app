@@ -2,6 +2,21 @@ import streamlit as st
 import json
 import os
 from datetime import datetime
+import ast
+
+# 万が一の記号バグを画面表示前に綺麗に掃除する関数
+def clean_text(text):
+    if not isinstance(text, str):
+        return str(text)
+    try:
+        parsed = ast.literal_eval(text)
+        if isinstance(parsed, dict):
+            return "\n\n".join([f"**{k}**\n" + ("\n".join(v) if isinstance(v, list) else str(v)) for k, v in parsed.items()])
+        elif isinstance(parsed, list):
+            return "\n".join([str(i) for i in parsed])
+    except:
+        pass
+    return text.replace("['", "").replace("']", "").replace("', '", "\n")
 
 st.set_page_config(page_title="投資ニュースAIサマリー", page_icon="📈", layout="wide")
 st.title("📊 個人専用：投資ニュースAIサマリー (自動更新版) 🚀")
@@ -21,22 +36,23 @@ if os.path.exists(SCHEDULE_FILE):
         with col1:
             with st.container(border=True):
                 st.markdown("#### 🗓️ 主な予定")
-                st.markdown(sched_data.get('schedule', 'データなし'))
+                st.markdown(clean_text(sched_data.get('schedule', 'データなし')))
                 
         with col2:
             with st.container(border=True):
                 st.markdown("#### 📈 指定12指数・為替")
+                # 指数はAIを通さずAPI直取りなのでそのまま表示（色付け済み！）
                 st.markdown(sched_data.get('indices', 'データなし'))
                 
         with col3:
             with st.container(border=True):
                 st.markdown("#### 📰 NEWS（経済指標）")
-                st.markdown(sched_data.get('news', 'データなし'))
+                st.markdown(clean_text(sched_data.get('news', 'データなし')))
 
         # --- 新設：日経225内部データ ---
         st.subheader("🔍 日経225 内部データ（騰落数・寄与度）")
         with st.container(border=True):
-            st.markdown(sched_data.get('contribution', '現在データ収集中です...'))
+            st.markdown(clean_text(sched_data.get('contribution', '現在データ収集中です...')))
             
             st.caption("※TOP50銘柄や、ヒートマップ（面積グラフ）などのさらに詳細な情報は以下のリンクから確認できます。")
             st.link_button("📊 みんかぶ（全銘柄寄与度）を開く", "https://fu.minkabu.jp/chart/nikkei225/contribution", use_container_width=True)
