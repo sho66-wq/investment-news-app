@@ -68,17 +68,14 @@ new_articles = []
 
 if target_entries:
     prompt = """
-あなたはプロの機関投資家です。以下の【ニュース一覧】を全て分析し、指定された【JSONフォーマット】で返してください。
+あなたはプロの機関投資家です。以下の【ニュース一覧】を全て分析してください。
+出力は必ず以下のJSON配列フォーマットにしてください。
 
-【カテゴリの選択肢】
-"株式・投資信託", "成長テーマ", "マクロ経済・地政学", "為替・金利", "不動産・生活", "その他"
-
-【JSONフォーマット（この形以外の文字は一切出力しないでください）】
 [
   {
     "id": 0,
-    "category": "選択したカテゴリ",
-    "summary": "今後の市場や取引材料としてどう影響するか、2〜3行の要約"
+    "category": "株式・投資信託",
+    "summary": "2〜3行の要約"
   }
 ]
 
@@ -88,16 +85,14 @@ if target_entries:
         prompt += f"ID: {i}\nタイトル: {entry.title}\n\n"
 
     try:
-        response = model.generate_content(prompt, safety_settings=safety_settings)
+        # JSON出力モードを強制（これで記号のバグを防ぎます）
+        response = model.generate_content(
+            prompt, 
+            safety_settings=safety_settings,
+            generation_config={"response_mime_type": "application/json"}
+        )
         if response.parts:
-            result_text = response.text.strip()
-            if result_text.startswith("```json"):
-                result_text = result_text[7:]
-            if result_text.endswith("```"):
-                result_text = result_text[:-3]
-            
-            ai_results = json.loads(result_text.strip())
-            
+            ai_results = json.loads(response.text)
             for res in ai_results:
                 idx = res.get("id")
                 if idx is not None and 0 <= idx < len(target_entries):
@@ -128,7 +123,7 @@ with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
 
 
-# --- 経済指標カレンダー＆主要指数＆みんかぶ寄与度のAIスクレイピング ---
+# --- 経済指標・主要指数・みんかぶのAIスクレイピング ---
 time.sleep(5) 
 
 schedule_result_json = {"schedule": "エラー", "indices": "エラー", "news": "エラー", "contribution": "エラー"}
@@ -144,55 +139,50 @@ try:
     soup_sched = BeautifulSoup(res_sched.text, "html.parser")
     for script in soup_sched(["script", "style"]):
         script.extract()
-    text_sched = soup_sched.get_text(separator='\n')[:6000]
+    text_sched = soup_sched.get_text(separator=' ', strip=True)[:15000]
 
-    # ② トップページ（主要12指数用）
-    res_top = requests.get("https://nikkei225jp.com/", headers=headers, timeout=15)
-    res_top.encoding = res_top.apparent_encoding
-    soup_top = BeautifulSoup(res_top.text, "html.parser")
-    for script in soup_top(["script", "style"]):
+    # ② 【大正解！】リアルタイム主要株価指数（/chart/）のページに変更
+    res_chart = requests.get("https://nikkei225jp.com/chart/", headers=headers, timeout=15)
+    res_chart.encoding = res_chart.apparent_encoding
+    soup_chart = BeautifulSoup(res_chart.text, "html.parser")
+    for script in soup_chart(["script", "style"]):
         script.extract()
-    text_top = soup_top.get_text(separator='\n')[:6000]
+    text_chart = soup_chart.get_text(separator=' ', strip=True)[:15000]
 
-    # ③ みんかぶページ（寄与度・騰落数用）
+    # ③ みんかぶページ
     res_min = requests.get("https://fu.minkabu.jp/chart/nikkei225/contribution", headers=headers, timeout=15)
     res_min.encoding = res_min.apparent_encoding
     soup_min = BeautifulSoup(res_min.text, "html.parser")
     for script in soup_min(["script", "style"]):
         script.extract()
-    # 銘柄名が多いので多めに切り取る
-    text_min = soup_min.get_text(separator='\n')[:10000]
+    text_min = soup_min.get_text(separator=' ', strip=True)[:15000]
 
     schedule_prompt = f"""
-あなたは優秀な金融アシスタントです。以下の3つのWebページデータから情報を抽出し、
-必ず以下の【JSONフォーマット】の形のみで出力してください。
+あなたは優秀な金融アシスタントです。以下の3つのWebページから情報を抽出し、必ず指定のJSON形式で出力してください。
+各値（value）は必ず「1つの長い文字列」にしてください。配列やオブジェクトは禁止です。箇条書きは「- 」と改行「\\n」を使ってください。見出しには「### 」をつけてください。
 
-【🚨 重要なデザインルール】
-見出しや強調したい箇所にはMarkdown（### や **太字**）を使ってください。
-
-【JSONフォーマット】
 {{
-  "schedule": "【ページ1】から「今週の主な予定」と「本日の主な予定」を見やすく箇条書きで（日付は ### で大きく）",
-  "indices": "【ページ2】から以下の12項目の最新値を抽出して箇条書きで（日本日経平均、日経先物、日本TOPIX、日本国債10年利回、為替ドル円、為替 ユーロ円、米国NYダウ、VIX恐怖指数、日経VI、WTI原油先物、NY金先物、ビットコイン）",
-  "news": "【ページ1】から「NEWS（経済指標）」を見やすく箇条書きで（日付は ### で大きく）",
-  "contribution": "【ページ3】から「日経225銘柄数集計（値上がり数、値下がり数）」と、「値上がり寄与上位」「値下がり寄与上位」をそれぞれ【TOP10銘柄まで】抜粋して箇条書きで見やすく（TOP50だと長すぎるため）"
+  "schedule": "【ページ1】から「今週の主な予定」と「本日の主な予定」を抜粋（日付は ### で大きく）",
+  "indices": "【ページ2】から（日本日経平均、日経先物、日本TOPIX、日本国債10年利回り、ドル円、ユーロ円、米国NYダウ、VIX恐怖指数、日経VI、WTI原油先物、NY金先物、ビットコイン）の最新価格と変動を箇条書きで抽出",
+  "news": "【ページ1】から「NEWS（経済指標）」を抜粋（日付は ### で大きく）",
+  "contribution": "【ページ3】から日経225の「値上がり銘柄数・値下がり銘柄数」と、「値上がり寄与度上位TOP10」「値下がり寄与度上位TOP10」を箇条書きで"
 }}
 
 【ページ1：スケジュール】\n{text_sched}
 \n---\n
-【ページ2：トップページ】\n{text_top}
+【ページ2：指数チャート】\n{text_chart}
 \n---\n
 【ページ3：みんかぶ寄与度】\n{text_min}
 """
     
-    schedule_response = model.generate_content(schedule_prompt, safety_settings=safety_settings)
+    # JSON出力を強制する
+    schedule_response = model.generate_content(
+        schedule_prompt, 
+        safety_settings=safety_settings,
+        generation_config={"response_mime_type": "application/json"}
+    )
     if schedule_response.parts:
-        res_text = schedule_response.text.strip()
-        if res_text.startswith("```json"):
-            res_text = res_text[7:]
-        if res_text.endswith("```"):
-            res_text = res_text[:-3]
-        schedule_result_json = json.loads(res_text.strip())
+        schedule_result_json = json.loads(schedule_response.text)
         
 except Exception as e:
     schedule_result_json = {"schedule": f"エラー: {e}", "indices": "エラー", "news": "エラー", "contribution": f"エラー: {e}"}
