@@ -4,7 +4,6 @@ import os
 from datetime import datetime
 import ast
 
-# 万が一の記号バグを画面表示前に綺麗に掃除する関数
 def clean_text(text):
     if not isinstance(text, str):
         return str(text)
@@ -41,7 +40,6 @@ if os.path.exists(SCHEDULE_FILE):
         with col2:
             with st.container(border=True):
                 st.markdown("#### 📈 指定12指数・為替")
-                # 指数はAIを通さずAPI直取りなのでそのまま表示（色付け済み！）
                 st.markdown(sched_data.get('indices', 'データなし'))
                 
         with col3:
@@ -49,7 +47,7 @@ if os.path.exists(SCHEDULE_FILE):
                 st.markdown("#### 📰 NEWS（経済指標）")
                 st.markdown(clean_text(sched_data.get('news', 'データなし')))
 
-        # --- 新設：日経225内部データ ---
+        # --- 中段：日経225内部データ ---
         st.subheader("🔍 日経225 内部データ（騰落数・寄与度）")
         with st.container(border=True):
             st.markdown(clean_text(sched_data.get('contribution', '現在データ収集中です...')))
@@ -82,15 +80,16 @@ if not news_data:
 else:
     st.success(f"📈 現在ストックされている有益な記事数: {len(news_data)}件")
     
-    # 変更前
-    # categories = ["株式・投資信託", "成長テーマ", "マクロ経済・地政学", "為替・金利", "不動産・生活", "その他"]
-    
-    # 変更後（これにコピペで丸ごと上書きしてください）
+    # 【追加】あなた専用の10カテゴリ
     categories = [
         "国内株・企業業績", "米国株・海外株", "日米金利・物価・為替", "世界経済・マクロ指標", 
         "国際情勢・地政学", "成長テーマ・新技術", "商品・暗号資産", 
         "不動産・住宅市場", "生活・社会保障", "その他"
     ]
+    
+    # 【修正】消えてしまっていた「箱」を確実に用意！
+    results = {cat: [] for cat in categories}
+    
     for item in news_data:
         cat = item.get("category", "その他")
         if cat in results:
@@ -109,23 +108,4 @@ else:
                     st.subheader(f"📰 {item['title']}")
                     
                     try:
-                        dt = datetime.fromisoformat(item['fetched_at'])
-                        formatted_time = dt.strftime("%Y/%m/%d %H:%M")
-                    except Exception:
-                        formatted_time = "不明"
-
-                    link = item.get('link', '')
-                    if 'yahoo.co.jp' in link:
-                        source = "Yahoo!ニュース"
-                    elif 'nhk.or.jp' in link:
-                        source = "NHKニュース"
-                    elif 'rakuten-sec.net' in link:
-                        source = "トウシル (楽天証券)"
-                    elif 'google' in link:
-                        source = "Googleニュース"
-                    else:
-                        source = "外部ニュースサイト"
-                        
-                    st.caption(f"🏢 配信元: **{source}** | ⏱ 取得日時: {formatted_time} | [🔗 元記事を読む]({link})")
-                    st.info(item['summary'])
-                    st.divider()
+                        dt = datetime.fromisoformat(item['fetched
