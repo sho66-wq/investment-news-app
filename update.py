@@ -85,7 +85,6 @@ if target_entries:
         prompt += f"ID: {i}\nタイトル: {entry.title}\n\n"
 
     try:
-        # JSON出力モードを強制（これで記号のバグを防ぎます）
         response = model.generate_content(
             prompt, 
             safety_settings=safety_settings,
@@ -123,17 +122,62 @@ with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
 
 
-# --- 経済指標・主要指数・みんかぶのAIスクレイピング ---
-time.sleep(5) 
-
-schedule_result_json = {"schedule": "エラー", "indices": "エラー", "news": "エラー", "contribution": "エラー"}
+# --- 【最強機能】12指数のデータをYahoo APIから直接取得（色付け付き） ---
+indices_text = ""
+symbols = "^N225,NIY=F,^TOPX,^JN09T,JPY=X,EURJPY=X,^DJI,^VIX,^VN225,CL=F,GC=F,BTC-JPY"
+names = {
+    "^N225": "日本日経平均",
+    "NIY=F": "日経先物",
+    "^TOPX": "日本TOPIX",
+    "^JN09T": "日本国債10年利回",
+    "JPY=X": "為替 ドル円",
+    "EURJPY=X": "為替 ユーロ円",
+    "^DJI": "米国NYダウ",
+    "^VIX": "VIX恐怖指数",
+    "^VN225": "日経VI",
+    "CL=F": "WTI原油先物",
+    "GC=F": "NY金先物",
+    "BTC-JPY": "ビットコイン"
+}
 
 try:
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
+    yf_url = f"https://query2.finance.yahoo.com/v7/finance/quote?symbols={symbols}"
+    yf_res = requests.get(yf_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}, timeout=10)
+    data = yf_res.json()
+    results = data.get("quoteResponse", {}).get("result", [])
+    fetched_data = {res["symbol"]: res for res in results}
     
-    # ① スケジュールページ
+    for sym, name in names.items():
+        if sym in fetched_data:
+            price = fetched_data[sym].get("regularMarketPrice", 0)
+            change = fetched_data[sym].get("regularMarketChangePercent", 0)
+            
+            # 色と矢印のフォーマット
+            if change > 0:
+                arrow = f":green[↑ +{change:.2f}%]"
+            elif change < 0:
+                arrow = f":red[↓ {change:.2f}%]"
+            else:
+                arrow = "±0.00%"
+                
+            price_str = f"{price:,.2f}" if price > 1000 else f"{price:.2f}"
+            
+            # 指数名を【青色】にして目立たせる
+            indices_text += f"- **:blue[{name}]**: {price_str} ({arrow})\n"
+        else:
+            indices_text += f"- **:gray[{name}]**: 取得不可\n"
+except Exception as e:
+    indices_text = "指数の取得に失敗しました。"
+
+
+# --- スケジュールとみんかぶのAIスクレイピング ---
+time.sleep(5) 
+schedule_result_json = {"schedule": "エラー", "indices": indices_text, "news": "エラー", "contribution": "エラー"}
+
+try:
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    # スケジュールページ
     res_sched = requests.get("https://nikkei225jp.com/schedule/", headers=headers, timeout=15)
     res_sched.encoding = res_sched.apparent_encoding
     soup_sched = BeautifulSoup(res_sched.text, "html.parser")
@@ -141,15 +185,7 @@ try:
         script.extract()
     text_sched = soup_sched.get_text(separator=' ', strip=True)[:15000]
 
-    # ② 【大正解！】リアルタイム主要株価指数（/chart/）のページに変更
-    res_chart = requests.get("https://nikkei225jp.com/chart/", headers=headers, timeout=15)
-    res_chart.encoding = res_chart.apparent_encoding
-    soup_chart = BeautifulSoup(res_chart.text, "html.parser")
-    for script in soup_chart(["script", "style"]):
-        script.extract()
-    text_chart = soup_chart.get_text(separator=' ', strip=True)[:15000]
-
-    # ③ みんかぶページ
+    # みんかぶページ
     res_min = requests.get("https://fu.minkabu.jp/chart/nikkei225/contribution", headers=headers, timeout=15)
     res_min.encoding = res_min.apparent_encoding
     soup_min = BeautifulSoup(res_min.text, "html.parser")
@@ -158,34 +194,38 @@ try:
     text_min = soup_min.get_text(separator=' ', strip=True)[:15000]
 
     schedule_prompt = f"""
-あなたは優秀な金融アシスタントです。以下の3つのWebページから情報を抽出し、必ず指定のJSON形式で出力してください。
-各値（value）は必ず「1つの長い文字列」にしてください。配列やオブジェクトは禁止です。箇条書きは「- 」と改行「\\n」を使ってください。見出しには「### 」をつけてください。
+あなたは金融アシスタントです。以下の2つのWebページから情報を抽出し、必ず指定のJSON形式で出力してください。
+
+【🚨 超絶対ルール】
+1. 各値（value）の中身は、必ず「ただの1つの長い文字列」にしてください。
+2. 値の中に、辞書 {{}} や配列 [] を書き込むことは絶対に禁止です。
+3. 箇条書きは「- 」と改行「\\n」を使ってください。
 
 {{
-  "schedule": "【ページ1】から「今週の主な予定」と「本日の主な予定」を抜粋（日付は ### で大きく）",
-  "indices": "【ページ2】から（日本日経平均、日経先物、日本TOPIX、日本国債10年利回り、ドル円、ユーロ円、米国NYダウ、VIX恐怖指数、日経VI、WTI原油先物、NY金先物、ビットコイン）の最新価格と変動を箇条書きで抽出",
+  "schedule": "【ページ1】から「今週と本日の主な予定」を抜粋（日付は ### で大きく）",
   "news": "【ページ1】から「NEWS（経済指標）」を抜粋（日付は ### で大きく）",
-  "contribution": "【ページ3】から日経225の「値上がり銘柄数・値下がり銘柄数」と、「値上がり寄与度上位TOP10」「値下がり寄与度上位TOP10」を箇条書きで"
+  "contribution": "【ページ2】から日経225の値上がり数・値下がり数、および寄与度上位・下位TOP10を箇条書きで"
 }}
 
 【ページ1：スケジュール】\n{text_sched}
 \n---\n
-【ページ2：指数チャート】\n{text_chart}
-\n---\n
-【ページ3：みんかぶ寄与度】\n{text_min}
+【ページ2：みんかぶ寄与度】\n{text_min}
 """
     
-    # JSON出力を強制する
     schedule_response = model.generate_content(
         schedule_prompt, 
         safety_settings=safety_settings,
         generation_config={"response_mime_type": "application/json"}
     )
     if schedule_response.parts:
-        schedule_result_json = json.loads(schedule_response.text)
+        ai_data = json.loads(schedule_response.text)
+        # AIの結果と、さっき取得した指数(indices_text)を合体させる
+        schedule_result_json["schedule"] = ai_data.get("schedule", "取得エラー")
+        schedule_result_json["news"] = ai_data.get("news", "取得エラー")
+        schedule_result_json["contribution"] = ai_data.get("contribution", "取得エラー")
         
 except Exception as e:
-    schedule_result_json = {"schedule": f"エラー: {e}", "indices": "エラー", "news": "エラー", "contribution": f"エラー: {e}"}
+    pass
 
 with open("schedule_data.json", "w", encoding="utf-8") as f:
     json.dump(schedule_result_json, f, ensure_ascii=False, indent=2)
