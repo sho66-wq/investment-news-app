@@ -149,16 +149,4 @@ for sym, name in symbols.items():
             prev_close = hist['Close'].iloc[-2]
             current = hist['Close'].iloc[-1]
             change = current - prev_close
-            change_pct = (change / prev_close) * 100
-            
-            if change_pct > 0:
-                arrow = f":green[↑ +{change_pct:.2f}%]"
-            elif change_pct < 0:
-                arrow = f":red[↓ {change_pct:.2f}%]"
-            else:
-                arrow = "±0.00%"
-                
-            price_str = f"{current:.2f}" if current < 1000 else f"{current:,.2f}"
-            display_lines[name] = f"- **:blue[{name}]**: {price_str} ({arrow})\n"
-        else:
-            display_lines[name] = f"- **:blue[{name}]**: 取得不可\n
+            change_pct = (change /
