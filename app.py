@@ -7,6 +7,16 @@ st.set_page_config(page_title="投資ニュースAI", page_icon="📈", layout="
 st.title("投資ニュースAIまとめ　 (自動更新版)")
 st.write("裏方ロボットが定期的に収集・分析した最新の経済ニュースをストック表示しています。（直近3日間を保持）")
 
+# --- サイドバーに本日の予定・経済指標を表示 ---
+st.sidebar.header("📅 本日の主な予定・経済指標")
+if os.path.exists("schedule_data.txt"):
+    with open("schedule_data.txt", "r", encoding="utf-8") as f:
+        schedule_text = f.read()
+    st.sidebar.info(schedule_text)
+else:
+    st.sidebar.write("現在データ収集中です...")
+# ---------------------------------------------
+
 DATA_FILE = "news_data.json"
 news_data = []
 
