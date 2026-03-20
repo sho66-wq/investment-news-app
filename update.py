@@ -17,16 +17,11 @@ model = genai.GenerativeModel("gemini-2.5-flash")
 DATA_FILE = "news_data.json"
 try:
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            news_data = json.load(f)
-    else:
-        news_data = []
-except:
-    news_data = []
+        with open(DATA_FILE, "r", encoding="utf-8") as f: news_data = json.load(f)
+    else: news_data = []
+except: news_data = []
 
-if len(news_data) < 10:
-    news_data = []
-
+if len(news_data) < 10: news_data = []
 existing_urls = set([item.get("link", "") for item in news_data])
 
 rss_urls = [
@@ -47,14 +42,11 @@ for url in rss_urls:
             if entry.link not in existing_urls:
                 all_entries.append(entry)
                 count += 1
-                if count >= 8:
-                    break
-    except Exception:
-        pass
+                if count >= 8: break
+    except: pass
 
 random.shuffle(all_entries)
 target_entries = all_entries[:15]
-
 JST = timezone(timedelta(hours=+9), 'JST')
 current_time_str = datetime.now(JST).isoformat()
 
@@ -67,10 +59,17 @@ safety_settings = [
 
 new_articles = []
 if target_entries:
+    # 【改善1】AIへの要約指示を「詳細かつ具体的」に超強化！
     prompt = """
 あなたはプロの機関投資家です。以下の【ニュース一覧】を全て分析し、以下のJSON配列フォーマットで出力してください。
 カテゴリ: "国内株・企業業績", "米国株・海外株", "日米金利・物価・為替", "世界経済・マクロ指標", "世界情勢・地政学", "成長テーマ・新技術", "商品・暗号資産", "不動産・住宅市場", "生活・社会保障", "その他"
-[{"id": 0, "category": "選択したカテゴリ", "summary": "要約"}]
+[
+  {
+    "id": 0, 
+    "category": "選択したカテゴリ", 
+    "summary": "記事の背景、重要な事実、および今後の市場や生活への具体的な影響について、3〜4行で詳細かつ具体的に要約してください。「要約中」などの手抜きは絶対に禁止です。"
+  }
+]
 """
     for i, entry in enumerate(target_entries):
         prompt += f"ID: {i}\nタイトル: {entry.title}\n\n"
@@ -96,10 +95,10 @@ for item in news_data:
 with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
 
-# --- 指数取得（データ構造として保存） ---
+# --- 指数取得 ---
 indices_data = {}
 
-# 1. yfinanceから確実に取れるもの
+# 1. yfinance
 symbols = {
     "^N225": "日本日経平均",
     "NIY=F": "日経先物",
@@ -135,29 +134,36 @@ try:
         indices_data["日本国債10年利回り"] = {"price": f"{val:.3f}%", "change": f"{change:.3f}pt"}
 except: pass
 
-# 3. TOPIXと日経VI（Google Financeから物理スクレイピングで確実取得）
-def get_gf(ticker, exch):
-    try:
-        url = f"https://www.google.com/finance/quote/{ticker}:{exch}"
-        html = requests.get(url, timeout=5).text
-        soup = BeautifulSoup(html, "html.parser")
-        p = soup.find(class_="YMlKec fxKbKc").text.strip()
-        c_tag = soup.find(class_="JwB6zf")
-        c = c_tag.text.strip() if c_tag else "0.00%"
-        return p, c
-    except: return None, None
+# 3. TOPIX（株探から確実取得）
+try:
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    res_t = requests.get("https://kabutan.jp/stock/?code=0010", headers=headers, timeout=5)
+    soup_t = BeautifulSoup(res_t.text, "html.parser")
+    p_topix = soup_t.find(class_="vdt-eq-a").text.strip()
+    c_topix = soup_t.find(class_="vdt-cv-a").text.strip()
+    if p_topix: indices_data["日本TOPIX"] = {"price": p_topix, "change": c_topix}
+except: pass
 
-p_topix, c_topix = get_gf("TOPIX", "INDEXTKY")
-if p_topix: indices_data["日本TOPIX"] = {"price": p_topix, "change": c_topix}
+# 4. 【改善2】日経VIを大元の「日経公式」から直接取得！（絶対確実）
+try:
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    res_vi = requests.get("https://indexes.nikkei.co.jp/nkave/index/profile?idx=nk225vi", headers=headers, timeout=5)
+    soup_vi = BeautifulSoup(res_vi.text, "html.parser")
+    p_vi = soup_vi.find("div", class_="index-value").text.strip()
+    # 前日比の部分（例: "-0.36 (-1.45%)" から % の部分だけを抜く）
+    c_vi_text = soup_vi.find("div", class_="index-diff").text.strip()
+    if "(" in c_vi_text:
+        c_vi = c_vi_text.split("(")[1].replace(")", "").strip()
+    else:
+        c_vi = c_vi_text
+    if p_vi: indices_data["日経VI"] = {"price": p_vi, "change": c_vi}
+except: pass
 
-p_vi, c_vi = get_gf("NI225VIX", "INDEXNIK")
-if p_vi: indices_data["日経VI"] = {"price": p_vi, "change": c_vi}
 
 # --- スケジュールとみんかぶ取得 ---
 time.sleep(5)
 SCHEDULE_FILE = "schedule_data.json"
 
-# エラー上書きを防ぐため、まずは初期値を設定
 schedule_result_json = {
     "schedule": "現在データを収集中です...",
     "indices": indices_data,
@@ -165,20 +171,14 @@ schedule_result_json = {
     "contribution": "現在データを収集中です..."
 }
 
-# もし過去の成功データがあれば引き継ぐ
 if os.path.exists(SCHEDULE_FILE):
     try:
         with open(SCHEDULE_FILE, "r", encoding="utf-8") as f:
             old_data = json.load(f)
-            # エラーの文字が入っていたら引き継がない
-            if "エラー" not in old_data.get("schedule", ""):
-                schedule_result_json["schedule"] = old_data.get("schedule", schedule_result_json["schedule"])
-            if "エラー" not in old_data.get("news", ""):
-                schedule_result_json["news"] = old_data.get("news", schedule_result_json["news"])
-            if "エラー" not in old_data.get("contribution", ""):
-                schedule_result_json["contribution"] = old_data.get("contribution", schedule_result_json["contribution"])
+            if "エラー" not in old_data.get("schedule", ""): schedule_result_json["schedule"] = old_data.get("schedule", schedule_result_json["schedule"])
+            if "エラー" not in old_data.get("news", ""): schedule_result_json["news"] = old_data.get("news", schedule_result_json["news"])
+            if "エラー" not in old_data.get("contribution", ""): schedule_result_json["contribution"] = old_data.get("contribution", schedule_result_json["contribution"])
             
-            # 取得に失敗した指数があれば前回値を補完する
             old_indices = old_data.get("indices", {})
             if isinstance(old_indices, dict):
                 for k, v in old_indices.items():
@@ -186,7 +186,6 @@ if os.path.exists(SCHEDULE_FILE):
                         schedule_result_json["indices"][k] = {"price": f"{v.get('price', '')} (※)", "change": v.get('change', '0.0%')}
     except: pass
 
-# 新しいデータの取得にチャレンジ
 try:
     headers = {'User-Agent': 'Mozilla/5.0'}
     res_sched = requests.get("https://nikkei225jp.com/schedule/", headers=headers, timeout=15)
@@ -201,8 +200,17 @@ try:
     for script in soup_min(["script", "style"]): script.extract()
     text_min = soup_min.get_text(separator=' ', strip=True)[:15000]
 
-    prompt_s = f"""あなたは金融アシスタントです。以下のWebページから情報を抽出しJSONで出力してください。
-{{"schedule": "今週・本日の予定(###で見出し)","news": "経済指標(###で見出し)","contribution": "値上がり・値下がり数と寄与度TOP10"}}
+    # 【改善3】AIへの指示を強化し、「{」や「[」の暗号出力を完全に禁止！
+    prompt_s = f"""
+あなたは金融アシスタントです。以下のWebページから情報を抽出し、必ず指定のJSON形式で出力してください。
+各値の中身には `{{` や `[` 、`"` などのプログラム用の記号を「絶対に」含めず、純粋な箇条書きのテキスト(`・`)と改行(`\\n`)のみを使ってください。
+
+{{
+  "schedule": "今週・本日の予定をきれいな日本語の箇条書きで",
+  "news": "経済指標をきれいな日本語の箇条書きで",
+  "contribution": "値上がり・値下がり数と寄与度TOP10をきれいな日本語の箇条書きで"
+}}
+
 【スケジュール】\n{text_sched}\n【みんかぶ】\n{text_min}"""
     
     response_s = model.generate_content(prompt_s, safety_settings=safety_settings, generation_config={"response_mime_type": "application/json"})
