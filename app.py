@@ -1,7 +1,41 @@
 import streamlit as st
 import json
 import os
+import re
 from datetime import datetime
+
+# ==========================================
+# 🎨 超強力：全自動カラーリング＆デザイン装置
+# ==========================================
+def colorize_text(text):
+    if not isinstance(text, str): return str(text)
+    
+    # 1. 「値上がり寄与」「値下がり寄与」のタイトルを専用の美しいボックスに変換
+    text = re.sub(
+        r'(?:\*\*)?(値上がり寄与TOP50[^\n]*)(?:\*\*)?', 
+        r'<div style="background-color:#e8f5e9; color:#2e7d32; padding:8px 12px; border-left: 6px solid #2e7d32; font-weight:bold; margin-top:16px; margin-bottom:8px; border-radius:4px; font-size:1.1em;">🚀 \1</div>', 
+        text
+    )
+    text = re.sub(
+        r'(?:\*\*)?(値下がり寄与TOP50[^\n]*)(?:\*\*)?', 
+        r'<div style="background-color:#ffebee; color:#d32f2f; padding:8px 12px; border-left: 6px solid #d32f2f; font-weight:bold; margin-top:16px; margin-bottom:8px; border-radius:4px; font-size:1.1em;">📉 \1</div>', 
+        text
+    )
+    
+    # 2. プラスの数字（緑色 ＋ うっすら背景色）
+    # (単位あり)
+    text = re.sub(r'([+▲↑]\s?\d+(?:,\d{3})*(?:\.\d+)?\s?(?:%|pt|円|ドル|ポイント|件|人|万|億|兆|倍))', r'<span style="color: #2e7d32; font-weight: bold; background-color: rgba(46,125,50,0.1); padding: 0 4px; border-radius: 3px;">\1</span>', text)
+    # (小数のみ・単位なし)
+    text = re.sub(r'(?<!\d)([+▲↑]\s?\d+(?:,\d{3})*\.\d+)(?!\d)', r'<span style="color: #2e7d32; font-weight: bold; background-color: rgba(46,125,50,0.1); padding: 0 4px; border-radius: 3px;">\1</span>', text)
+
+    # 3. マイナスの数字（赤色 ＋ うっすら背景色）※日付を回避
+    # (単位あり)
+    text = re.sub(r'([-▼↓]\s?\d+(?:,\d{3})*(?:\.\d+)?\s?(?:%|pt|円|ドル|ポイント|件|人|万|億|兆|倍))', r'<span style="color: #d32f2f; font-weight: bold; background-color: rgba(211,47,47,0.1); padding: 0 4px; border-radius: 3px;">\1</span>', text)
+    # (小数のみ・単位なし)
+    text = re.sub(r'(?<!\d)([-▼↓]\s?\d+(?:,\d{3})*\.\d+)(?!\d)', r'<span style="color: #d32f2f; font-weight: bold; background-color: rgba(211,47,47,0.1); padding: 0 4px; border-radius: 3px;">\1</span>', text)
+    
+    return text
+
 
 st.set_page_config(page_title="投資ニュースAIサマリー", page_icon="📈", layout="wide")
 
@@ -16,7 +50,6 @@ if os.path.exists(SCHEDULE_FILE):
             sched_data = json.load(f)
     except: pass
 
-# 左 1.2 : 右 2.5 のレイアウト
 col_left, col_right = st.columns([1.2, 2.5])
 
 # ----------------------------------------
@@ -54,20 +87,18 @@ with col_left:
     st.write("")
     st.caption("*(データ取得元: [Yahoo Finance](https://finance.yahoo.co.jp/) / [Google Finance](https://www.google.com/finance/) / [財務省](https://www.mof.go.jp/) / [日経プロフィル](https://indexes.nikkei.co.jp/))*")
 
-    st.write("") # 少し隙間を空ける
-    
-    # ▼▼ ここに右側から「日経225内部データ」をお引越ししました！ ▼▼
+    st.write("")
     st.subheader("🔍 日経225 内部データ")
     with st.container(border=True):
-        st.markdown(sched_data.get('contribution', 'データ収集中...'))
+        # 魔法のカラーリング機能を適用！ (HTMLを許可)
+        st.markdown(colorize_text(sched_data.get('contribution', 'データ収集中...')), unsafe_allow_html=True)
         
-        # 細いカラムに合わせて、ボタンを横並びではなく「縦積み」にしています
         st.link_button("📊 みんかぶ（全銘柄寄与度）を開く", "https://fu.minkabu.jp/chart/nikkei225/contribution", use_container_width=True)
         st.link_button("🗺️ 日経平均ヒートマップを開く", "https://nikkei225jp.com/chart/nikkei.php", use_container_width=True)
 
 
 # ----------------------------------------
-# 【右側カラム】スケジュール ＋ ニュース（経済指標）
+# 【右側カラム】スケジュール ＋ ニュース
 # ----------------------------------------
 with col_right:
     st.subheader("📅 本日の市場データ・予定")
@@ -75,12 +106,11 @@ with col_right:
     with col_sched:
         with st.container(border=True):
             st.markdown("#### 🗓️ 主な予定")
-            st.markdown(sched_data.get('schedule', 'データ収集中...'))
+            st.markdown(colorize_text(sched_data.get('schedule', 'データ収集中...')), unsafe_allow_html=True)
     with col_news:
         with st.container(border=True):
             st.markdown("#### 📰 経済指標")
-            st.markdown(sched_data.get('news', 'データ収集中...'))
-
+            st.markdown(colorize_text(sched_data.get('news', 'データ収集中...')), unsafe_allow_html=True)
 
 st.divider()
 
@@ -119,5 +149,8 @@ if os.path.exists(DATA_FILE):
                             f_time = dt.strftime("%Y/%m/%d %H:%M")
                         except: f_time = "不明"
                         st.caption(f"⏱ 取得日時: {f_time} | [🔗 元記事を読む]({item.get('link', '')})")
-                        st.info(item.get('summary', ''))
+                        
+                        # st.infoの見た目をHTMLで再現しつつ、内部のカラーリングを有効にする裏技！
+                        summary_html = f"<div style='background-color: #f0f2f6; padding: 16px; border-radius: 0.5rem; margin-bottom: 16px;'>{colorize_text(item.get('summary', ''))}</div>"
+                        st.markdown(summary_html, unsafe_allow_html=True)
                         st.divider()
