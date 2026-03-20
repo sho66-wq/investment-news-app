@@ -1,7 +1,7 @@
 import os
 import json
 import time
-import re
+import random
 from datetime import datetime, timedelta, timezone
 import feedparser
 import google.generativeai as genai
@@ -11,108 +11,207 @@ import yfinance as yf
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 genai.configure(api_key=GOOGLE_API_KEY)
+
 model = genai.GenerativeModel("gemini-2.5-flash")
 
-JST = timezone(timedelta(hours=+9), 'JST')
-current_time_str = datetime.now(JST).isoformat()
-SCHEDULE_FILE = "schedule_data.json"
-
-# --- 1. データの保護・読み込み ---
-def load_old_data():
-    if os.path.exists(SCHEDULE_FILE):
-        try:
-            with open(SCHEDULE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except: return {}
-    return {}
-
-old_all_data = load_old_data()
-
-# --- 2. ニュース取得と分類 ---
 DATA_FILE = "news_data.json"
 try:
-    with open(DATA_FILE, "r", encoding="utf-8") as f: news_data = json.load(f)
-except: news_data = []
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            news_data = json.load(f)
+    else:
+        news_data = []
+except:
+    news_data = []
+
+if len(news_data) < 10:
+    news_data = []
+
+existing_urls = set([item.get("link", "") for item in news_data])
 
 rss_urls = [
     "https://news.yahoo.co.jp/rss/topics/business.xml",
     "https://www.nhk.or.jp/rss/news/cat6.xml",
     "https://news.yahoo.co.jp/rss/media/bloom_st/all.xml",
-    "https://news.yahoo.co.jp/rss/media/reut/all.xml"
+    "https://news.yahoo.co.jp/rss/media/reut/all.xml",
+    "https://news.yahoo.co.jp/rss/topics/world.xml",
+    "https://media.rakuten-sec.net/list/feed/rss"
 ]
-existing_urls = set([item.get("link", "") for item in news_data])
+
 all_entries = []
 for url in rss_urls:
-    feed = feedparser.parse(url)
-    for entry in feed.entries[:5]:
-        if entry.link not in existing_urls: all_entries.append(entry)
-
-if all_entries:
-    prompt = "投資家として以下を分析しJSONで出力せよ。カテゴリ: 国内株・企業業績, 米国株・海外株, 日米金利・物価・為替, 世界経済・マクロ指標, 世界情勢・地政学, 成長テーマ・新技術, 商品・暗号資産, 不動産・住宅市場, 生活・社会保障, その他"
-    for i, e in enumerate(all_entries[:15]): prompt += f"\nID:{i} {e.title}"
     try:
-        res = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
-        ai_res = json.loads(res.text)
-        for r in ai_res:
-            idx = r.get("id")
-            if idx is not None and idx < len(all_entries):
-                news_data.append({"title": all_entries[idx].title, "link": all_entries[idx].link, "summary": r.get("summary", "要約中"), "category": r.get("category", "その他"), "fetched_at": current_time_str})
+        feed = feedparser.parse(url)
+        count = 0
+        for entry in feed.entries:
+            if entry.link not in existing_urls:
+                all_entries.append(entry)
+                count += 1
+                if count >= 8:
+                    break
+    except Exception:
+        pass
+
+random.shuffle(all_entries)
+target_entries = all_entries[:15]
+
+JST = timezone(timedelta(hours=+9), 'JST')
+current_time_str = datetime.now(JST).isoformat()
+
+safety_settings = [
+    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+]
+
+new_articles = []
+if target_entries:
+    prompt = """
+あなたはプロの機関投資家です。以下の【ニュース一覧】を全て分析し、以下のJSON配列フォーマットで出力してください。
+カテゴリ: "国内株・企業業績", "米国株・海外株", "日米金利・物価・為替", "世界経済・マクロ指標", "世界情勢・地政学", "成長テーマ・新技術", "商品・暗号資産", "不動産・住宅市場", "生活・社会保障", "その他"
+[{"id": 0, "category": "選択したカテゴリ", "summary": "要約"}]
+"""
+    for i, entry in enumerate(target_entries):
+        prompt += f"ID: {i}\nタイトル: {entry.title}\n\n"
+    try:
+        response = model.generate_content(prompt, safety_settings=safety_settings, generation_config={"response_mime_type": "application/json"})
+        if response.parts:
+            ai_results = json.loads(response.text)
+            for res in ai_results:
+                idx = res.get("id")
+                if idx is not None and 0 <= idx < len(target_entries):
+                    entry = target_entries[idx]
+                    new_articles.append({"title": entry.title, "link": entry.link, "summary": res.get("summary", "要約なし"), "category": res.get("category", "その他"), "fetched_at": current_time_str})
     except: pass
 
-with open(DATA_FILE, "w", encoding="utf-8") as f: json.dump(news_data[-200:], f, ensure_ascii=False, indent=2)
-
-# --- 3. 指数の物理抽出エンジン (100点仕様) ---
-indices_data = old_all_data.get("indices", {})
-if not isinstance(indices_data, dict): indices_data = {}
-
-def get_gf_price(ticker, exchange):
-    url = f"https://www.google.com/finance/quote/{ticker}:{exchange}"
+news_data.extend(new_articles)
+filtered_news_data = []
+now = datetime.now(JST)
+for item in news_data:
     try:
-        r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-        soup = BeautifulSoup(r.text, "html.parser")
-        price = soup.find(class_="YMlKec fxKbKc").text
-        change = soup.find(class_="JwB6zf").text
-        return price, change
+        fetched_time = datetime.fromisoformat(item["fetched_at"])
+        if (now - fetched_time).days <= 3: filtered_news_data.append(item)
+    except: pass
+with open(DATA_FILE, "w", encoding="utf-8") as f:
+    json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
+
+# --- 指数取得（データ構造として保存） ---
+indices_data = {}
+
+# 1. yfinanceから確実に取れるもの
+symbols = {
+    "^N225": "日本日経平均",
+    "NIY=F": "日経先物",
+    "JPY=X": "為替 ドル円",
+    "EURJPY=X": "為替 ユーロ円",
+    "^DJI": "米国NYダウ",
+    "^VIX": "VIX恐怖指数",
+    "CL=F": "WTI原油先物",
+    "GC=F": "NY金先物",
+    "BTC-JPY": "ビットコイン"
+}
+for sym, name in symbols.items():
+    try:
+        ticker = yf.Ticker(sym)
+        hist = ticker.history(period="5d")
+        if len(hist) >= 2:
+            prev_close = hist['Close'].iloc[-2]
+            current = hist['Close'].iloc[-1]
+            change_pct = ((current - prev_close) / prev_close) * 100
+            price_str = f"{current:.2f}" if current < 1000 else f"{current:,.2f}"
+            indices_data[name] = {"price": price_str, "change": f"{change_pct:.2f}%"}
+    except: pass
+
+# 2. 国債（財務省）
+try:
+    res = requests.get('https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv', timeout=10)
+    res.encoding = 'shift_jis'
+    lines = [line.split(',') for line in res.text.strip().split('\n') if line]
+    valid_lines = [l for l in lines if len(l) >= 11 and l[10].replace('.', '', 1).isdigit()]
+    if len(valid_lines) >= 2:
+        val = float(valid_lines[-1][10])
+        change = val - float(valid_lines[-2][10])
+        indices_data["日本国債10年利回り"] = {"price": f"{val:.3f}%", "change": f"{change:.3f}pt"}
+except: pass
+
+# 3. TOPIXと日経VI（Google Financeから物理スクレイピングで確実取得）
+def get_gf(ticker, exch):
+    try:
+        url = f"https://www.google.com/finance/quote/{ticker}:{exch}"
+        html = requests.get(url, timeout=5).text
+        soup = BeautifulSoup(html, "html.parser")
+        p = soup.find(class_="YMlKec fxKbKc").text.strip()
+        c_tag = soup.find(class_="JwB6zf")
+        c = c_tag.text.strip() if c_tag else "0.00%"
+        return p, c
     except: return None, None
 
-# yfinanceで取れるもの
-yf_symbols = {"^N225": "日本日経平均", "NIY=F": "日経先物", "JPY=X": "為替 ドル円", "EURJPY=X": "為替 ユーロ円", "^DJI": "米国NYダウ", "^VIX": "VIX恐怖指数", "CL=F": "WTI原油先物", "GC=F": "NY金先物", "BTC-JPY": "ビットコイン"}
-for sym, name in yf_symbols.items():
+p_topix, c_topix = get_gf("TOPIX", "INDEXTKY")
+if p_topix: indices_data["日本TOPIX"] = {"price": p_topix, "change": c_topix}
+
+p_vi, c_vi = get_gf("NI225VIX", "INDEXNIK")
+if p_vi: indices_data["日経VI"] = {"price": p_vi, "change": c_vi}
+
+# --- スケジュールとみんかぶ取得 ---
+time.sleep(5)
+SCHEDULE_FILE = "schedule_data.json"
+
+# エラー上書きを防ぐため、まずは初期値を設定
+schedule_result_json = {
+    "schedule": "現在データを収集中です...",
+    "indices": indices_data,
+    "news": "現在データを収集中です...",
+    "contribution": "現在データを収集中です..."
+}
+
+# もし過去の成功データがあれば引き継ぐ
+if os.path.exists(SCHEDULE_FILE):
     try:
-        t = yf.Ticker(sym).history(period="2d")
-        p = t['Close'].iloc[-1]
-        c = ((p - t['Close'].iloc[-2]) / t['Close'].iloc[-2]) * 100
-        indices_data[name] = {"price": f"{p:,.2f}", "change": f"{c:+.2f}%"}
+        with open(SCHEDULE_FILE, "r", encoding="utf-8") as f:
+            old_data = json.load(f)
+            # エラーの文字が入っていたら引き継がない
+            if "エラー" not in old_data.get("schedule", ""):
+                schedule_result_json["schedule"] = old_data.get("schedule", schedule_result_json["schedule"])
+            if "エラー" not in old_data.get("news", ""):
+                schedule_result_json["news"] = old_data.get("news", schedule_result_json["news"])
+            if "エラー" not in old_data.get("contribution", ""):
+                schedule_result_json["contribution"] = old_data.get("contribution", schedule_result_json["contribution"])
+            
+            # 取得に失敗した指数があれば前回値を補完する
+            old_indices = old_data.get("indices", {})
+            if isinstance(old_indices, dict):
+                for k, v in old_indices.items():
+                    if k not in indices_data:
+                        schedule_result_json["indices"][k] = {"price": f"{v.get('price', '')} (※)", "change": v.get('change', '0.0%')}
     except: pass
 
-# Google Financeで物理的に抜くもの (TOPIX, VI)
-for name, tck in [("日本TOPIX", ("TOPIX", "INDEXTKY")), ("日経VI", ("NI225VIX", "INDEXNIK"))]:
-    p, c = get_gf_price(tck[0], tck[1])
-    if p: indices_data[name] = {"price": p, "change": c}
-
-# 国債
+# 新しいデータの取得にチャレンジ
 try:
-    r = requests.get('https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv').content.decode('shift_jis')
-    lines = [l.split(',') for l in r.strip().split('\n') if l]
-    latest = lines[-1]
-    val = float(latest[10])
-    change = val - float(lines[-2][10])
-    indices_data["日本国債10年利回り"] = {"price": f"{val:.3f}%", "change": f"{change:+.3f}pt"}
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    res_sched = requests.get("https://nikkei225jp.com/schedule/", headers=headers, timeout=15)
+    res_sched.encoding = res_sched.apparent_encoding
+    soup_sched = BeautifulSoup(res_sched.text, "html.parser")
+    for script in soup_sched(["script", "style"]): script.extract()
+    text_sched = soup_sched.get_text(separator=' ', strip=True)[:15000]
+
+    res_min = requests.get("https://fu.minkabu.jp/chart/nikkei225/contribution", headers=headers, timeout=15)
+    res_min.encoding = res_min.apparent_encoding
+    soup_min = BeautifulSoup(res_min.text, "html.parser")
+    for script in soup_min(["script", "style"]): script.extract()
+    text_min = soup_min.get_text(separator=' ', strip=True)[:15000]
+
+    prompt_s = f"""あなたは金融アシスタントです。以下のWebページから情報を抽出しJSONで出力してください。
+{{"schedule": "今週・本日の予定(###で見出し)","news": "経済指標(###で見出し)","contribution": "値上がり・値下がり数と寄与度TOP10"}}
+【スケジュール】\n{text_sched}\n【みんかぶ】\n{text_min}"""
+    
+    response_s = model.generate_content(prompt_s, safety_settings=safety_settings, generation_config={"response_mime_type": "application/json"})
+    if response_s.parts:
+        ai_data = json.loads(response_s.text)
+        schedule_result_json["schedule"] = ai_data.get("schedule", schedule_result_json["schedule"])
+        schedule_result_json["news"] = ai_data.get("news", schedule_result_json["news"])
+        schedule_result_json["contribution"] = ai_data.get("contribution", schedule_result_json["contribution"])
 except: pass
 
-# --- 4. スケジュール取得 (失敗時は古いデータを維持) ---
-new_sched = old_all_data.get("schedule", "取得中...")
-new_news = old_all_data.get("news", "取得中...")
-new_cont = old_all_data.get("contribution", "取得中...")
-
-try:
-    s_text = requests.get("https://nikkei225jp.com/schedule/", timeout=10).text
-    m_text = requests.get("https://fu.minkabu.jp/chart/nikkei225/contribution", timeout=10).text
-    prompt_s = f"以下からJSON出力せよ。{{'s':'予定','n':'指標','c':'寄与度'}}\n{s_text[:5000]}\n{m_text[:5000]}"
-    res_s = model.generate_content(prompt_s, generation_config={"response_mime_type": "application/json"})
-    ai_s = json.loads(res_s.text)
-    new_sched, new_news, new_cont = ai_s.get('s'), ai_s.get('n'), ai_s.get('c')
-except: pass
-
-final_save = {"schedule": new_sched, "indices": indices_data, "news": new_news, "contribution": new_cont}
-with open(SCHEDULE_FILE, "w", encoding="utf-8") as f: json.dump(final_save, f, ensure_ascii=False, indent=2)
+with open(SCHEDULE_FILE, "w", encoding="utf-8") as f:
+    json.dump(schedule_result_json, f, ensure_ascii=False, indent=2)
