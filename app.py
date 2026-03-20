@@ -5,12 +5,6 @@ from datetime import datetime
 
 st.set_page_config(page_title="投資ニュースAIサマリー", page_icon="📈", layout="wide")
 
-st.markdown("""
-<style>
-div[data-testid="stMetricValue"] { font-size: 1.5rem; }
-</style>
-""", unsafe_allow_html=True)
-
 st.title("📊 個人専用：投資ニュースAIサマリー (自動更新版)")
 st.write("裏方ロボットが定期的に収集・分析した最新の市場データと経済ニュースをストック表示しています。")
 
@@ -22,26 +16,60 @@ if os.path.exists(SCHEDULE_FILE):
             sched_data = json.load(f)
     except: pass
 
-col_left, col_right = st.columns([1, 2.5])
+col_left, col_right = st.columns([1.2, 2.5])
 
 with col_left:
     st.subheader("📈 リアルタイム市況")
-    with st.container(border=True):
-        indices_data = sched_data.get('indices', {})
-        if isinstance(indices_data, dict) and indices_data:
-            order = ["日本日経平均", "日経先物", "日本TOPIX", "日本国債10年利回り", "為替 ドル円", "為替 ユーロ円", "米国NYダウ", "VIX恐怖指数", "日経VI", "WTI原油先物", "NY金先物", "ビットコイン"]
-            for name in order:
-                d = indices_data.get(name, {"price": "取得不可", "change": "0.0%"})
-                st.metric(label=name, value=d.get('price', '取得不可'), delta=d.get('change', '0.0%'))
-        else:
-            st.write("データを収集中です。")
+    
+    # --- 【特製】nikkei225jp風 HTML/CSS ボード ---
+    indices_data = sched_data.get('indices', {})
+    if isinstance(indices_data, dict) and indices_data:
+        order = ["日本日経平均", "日経先物", "日本TOPIX", "日本国債10年利回り", "為替 ドル円", "為替 ユーロ円", "米国NYダウ", "VIX恐怖指数", "日経VI", "WTI原油先物", "NY金先物", "ビットコイン"]
+        
+        html_board = """
+        <style>
+        .market-board { width: 100%; border-collapse: collapse; font-family: sans-serif; box-shadow: 0 1px 3px rgba(0,0,0,0.2); border-radius: 4px; overflow: hidden; }
+        .market-board tr { border-bottom: 1px solid #ddd; background-color: #fff; }
+        .market-board td { padding: 10px 8px; vertical-align: middle; }
+        .market-board .name-col { width: 35%; background-color: #424242; color: #fff; font-weight: bold; font-size: 13px; text-align: left; border-right: 1px solid #555;}
+        .market-board .price-col { width: 35%; font-size: 18px; font-weight: bold; text-align: right; color: #333; }
+        .market-board .change-col { width: 30%; font-size: 14px; font-weight: bold; text-align: right; }
+        .change-up { color: #d32f2f; background-color: #ffebee; border-radius: 3px; padding: 4px; display: inline-block;}
+        .change-down { color: #2e7d32; background-color: #e8f5e9; border-radius: 3px; padding: 4px; display: inline-block;}
+        .change-flat { color: #555; background-color: #f5f5f5; border-radius: 3px; padding: 4px; display: inline-block;}
+        </style>
+        <table class="market-board">
+        """
+        for name in order:
+            d = indices_data.get(name, {"price": "取得不可", "change": "0.0%"})
+            p = d.get('price', '取得不可')
+            c = str(d.get('change', '0.0%'))
             
-        st.divider()
-        st.markdown("**出典元リンク:**")
-        st.markdown("- [Yahoo!ファイナンス](https://finance.yahoo.co.jp/)")
-        st.markdown("- [Google Finance](https://www.google.com/finance/)")
-        st.markdown("- [財務省(国債)](https://www.mof.go.jp/)")
-        st.markdown("- [日経プロフィル(VI)](https://indexes.nikkei.co.jp/)")
+            # 色の判定 (日本の市況サイトに合わせ、マイナスは緑、プラスは赤系などの調整も可能ですが、標準的な 色付き背景ボックス を作ります)
+            if "-" in c:
+                change_class = "change-down" # 下落
+            elif "+" in c or (c != "0.0%" and c != "0.0pt" and "取得不可" not in c):
+                change_class = "change-up"   # 上昇
+                if not c.startswith("+"): c = "+" + c
+            else:
+                change_class = "change-flat"
+                
+            html_board += f"""
+            <tr>
+                <td class="name-col">{name}</td>
+                <td class="price-col">{p}</td>
+                <td class="change-col"><span class="{change_class}">{c}</span></td>
+            </tr>
+            """
+        html_board += "</table>"
+        
+        # HTMLをStreamlitに直接描画
+        st.markdown(html_board, unsafe_allow_html=True)
+    else:
+        st.write("データを収集中です。")
+        
+    st.write("")
+    st.caption("*(データ取得元: [Yahoo Finance](https://finance.yahoo.co.jp/) / [Google Finance](https://www.google.com/finance/) / [財務省](https://www.mof.go.jp/) / [日経プロフィル](https://indexes.nikkei.co.jp/))*")
 
 with col_right:
     st.subheader("📅 本日の市場データ・予定")
@@ -98,7 +126,5 @@ if os.path.exists(DATA_FILE):
                             f_time = dt.strftime("%Y/%m/%d %H:%M")
                         except: f_time = "不明"
                         st.caption(f"⏱ 取得日時: {f_time} | [🔗 元記事を読む]({item.get('link', '')})")
-                        
-                        # 【修正】st.markdown から st.info に戻し、青い枠を復活させました！
                         st.info(item.get('summary', ''))
                         st.divider()
