@@ -21,49 +21,32 @@ col_left, col_right = st.columns([1.2, 2.5])
 with col_left:
     st.subheader("📈 リアルタイム市況")
     
-    # --- 【特製】nikkei225jp風 HTML/CSS ボード ---
     indices_data = sched_data.get('indices', {})
     if isinstance(indices_data, dict) and indices_data:
         order = ["日本日経平均", "日経先物", "日本TOPIX", "日本国債10年利回り", "為替 ドル円", "為替 ユーロ円", "米国NYダウ", "VIX恐怖指数", "日経VI", "WTI原油先物", "NY金先物", "ビットコイン"]
         
-        html_board = """
-        <style>
-        .market-board { width: 100%; border-collapse: collapse; font-family: sans-serif; box-shadow: 0 1px 3px rgba(0,0,0,0.2); border-radius: 4px; overflow: hidden; }
-        .market-board tr { border-bottom: 1px solid #ddd; background-color: #fff; }
-        .market-board td { padding: 10px 8px; vertical-align: middle; }
-        .market-board .name-col { width: 35%; background-color: #424242; color: #fff; font-weight: bold; font-size: 13px; text-align: left; border-right: 1px solid #555;}
-        .market-board .price-col { width: 35%; font-size: 18px; font-weight: bold; text-align: right; color: #333; }
-        .market-board .change-col { width: 30%; font-size: 14px; font-weight: bold; text-align: right; }
-        .change-up { color: #d32f2f; background-color: #ffebee; border-radius: 3px; padding: 4px; display: inline-block;}
-        .change-down { color: #2e7d32; background-color: #e8f5e9; border-radius: 3px; padding: 4px; display: inline-block;}
-        .change-flat { color: #555; background-color: #f5f5f5; border-radius: 3px; padding: 4px; display: inline-block;}
-        </style>
-        <table class="market-board">
-        """
+        # 【修正】スペース（字下げ）を完全に排除し、1行でHTMLを構築することでコード漏れを防止！
+        html_board = "<style>.market-board { width: 100%; border-collapse: collapse; font-family: sans-serif; box-shadow: 0 1px 3px rgba(0,0,0,0.2); border-radius: 4px; overflow: hidden; } .market-board tr { border-bottom: 1px solid #ddd; background-color: #fff; } .market-board td { padding: 10px 8px; vertical-align: middle; } .market-board .name-col { width: 35%; background-color: #424242; color: #fff; font-weight: bold; font-size: 13px; text-align: left; border-right: 1px solid #555;} .market-board .price-col { width: 35%; font-size: 18px; font-weight: bold; text-align: right; color: #333; } .market-board .change-col { width: 30%; font-size: 14px; font-weight: bold; text-align: right; } .change-up { color: #d32f2f; background-color: #ffebee; border-radius: 3px; padding: 4px; display: inline-block;} .change-down { color: #2e7d32; background-color: #e8f5e9; border-radius: 3px; padding: 4px; display: inline-block;} .change-flat { color: #555; background-color: #f5f5f5; border-radius: 3px; padding: 4px; display: inline-block;} </style><table class='market-board'>"
+        
         for name in order:
             d = indices_data.get(name, {"price": "取得不可", "change": "0.0%"})
             p = d.get('price', '取得不可')
             c = str(d.get('change', '0.0%'))
             
-            # 色の判定 (日本の市況サイトに合わせ、マイナスは緑、プラスは赤系などの調整も可能ですが、標準的な 色付き背景ボックス を作ります)
             if "-" in c:
-                change_class = "change-down" # 下落
+                change_class = "change-down"
             elif "+" in c or (c != "0.0%" and c != "0.0pt" and "取得不可" not in c):
-                change_class = "change-up"   # 上昇
+                change_class = "change-up"
                 if not c.startswith("+"): c = "+" + c
             else:
                 change_class = "change-flat"
                 
-            html_board += f"""
-            <tr>
-                <td class="name-col">{name}</td>
-                <td class="price-col">{p}</td>
-                <td class="change-col"><span class="{change_class}">{c}</span></td>
-            </tr>
-            """
+            # ここも字下げなしで追加
+            html_board += f"<tr><td class='name-col'>{name}</td><td class='price-col'>{p}</td><td class='change-col'><span class='{change_class}'>{c}</span></td></tr>"
+            
         html_board += "</table>"
         
-        # HTMLをStreamlitに直接描画
+        # HTMLとして画面に描画
         st.markdown(html_board, unsafe_allow_html=True)
     else:
         st.write("データを収集中です。")
