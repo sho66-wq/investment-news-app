@@ -63,7 +63,7 @@ if target_entries:
   {
     "id": 0, 
     "category": "選択したカテゴリ", 
-    "summary": "【事実】報道されている確定した事実を1〜2行で簡潔に記載。\\n【プロの推測】その事実を元に、プロとして今後の市場への影響を推測した内容を2〜3行で記載。"
+    "summary": "**【事実】** 報道されている確定した事実を1〜2行で簡潔に記載。\\n**【プロの推測】** その事実を元に、プロとして今後の市場への影響を推測した内容を2〜3行で記載。"
   }
 ]
 """
@@ -89,11 +89,12 @@ with open(DATA_FILE, "w", encoding="utf-8") as f:
 # --- 指数取得 ---
 indices_data = {}
 
-# 1. yfinance
+# 1. 基本の yfinance
 symbols = {
-    "^N225": "日本日経平均", "NIY=F": "日経先物", "JPY=X": "為替 ドル円",
-    "EURJPY=X": "為替 ユーロ円", "^DJI": "米国NYダウ", "^VIX": "VIX恐怖指数",
-    "CL=F": "WTI原油先物", "GC=F": "NY金先物", "BTC-JPY": "ビットコイン"
+    "^N225": "日本日経平均", "NIY=F": "日経先物", "^TOPX": "日本TOPIX",
+    "JPY=X": "為替 ドル円", "EURJPY=X": "為替 ユーロ円", "^DJI": "米国NYダウ", 
+    "^VIX": "VIX恐怖指数", "^JNIV": "日経VI", "CL=F": "WTI原油先物", 
+    "GC=F": "NY金先物", "BTC-JPY": "ビットコイン"
 }
 for sym, name in symbols.items():
     try:
@@ -103,7 +104,26 @@ for sym, name in symbols.items():
             indices_data[name] = {"price": f"{curr:,.2f}", "change": f"{((curr - prev) / prev * 100):.2f}%"}
     except: pass
 
-# 2. 国債（財務省）
+# 2. TOPIXのETF代替（yfinanceルート）
+if "日本TOPIX" not in indices_data:
+    try:
+        hist = yf.Ticker("1306.T").history(period="5d")
+        if len(hist) >= 2:
+            prev, curr = hist['Close'].iloc[-2], hist['Close'].iloc[-1]
+            indices_data["日本TOPIX"] = {"price": f"{curr:,.2f} (ETF)", "change": f"{((curr - prev) / prev * 100):.2f}%"}
+    except: pass
+
+# 3. TOPIXのETF代替（Google Financeルート：1306:TYO）最強の保険
+if "日本TOPIX" not in indices_data:
+    try:
+        res = requests.get("https://www.google.com/finance/quote/1306:TYO", headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+        soup = BeautifulSoup(res.text, "html.parser")
+        p = soup.find(class_="YMlKec fxKbKc").text.strip()
+        c = soup.find(class_="JwB6zf").text.strip()
+        indices_data["日本TOPIX"] = {"price": f"{p} (ETF)", "change": c}
+    except: pass
+
+# 4. 国債（財務省）
 try:
     res = requests.get('https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv', timeout=5)
     res.encoding = 'shift_jis'
@@ -114,23 +134,16 @@ try:
         indices_data["日本国債10年利回り"] = {"price": f"{val:.3f}%", "change": f"{change:.3f}pt"}
 except: pass
 
-# 3. TOPIX と 日経VI（Google FinanceからBeautifulSoupで物理抽出）
-def get_google_finance(ticker, exchange):
-    url = f"https://www.google.com/finance/quote/{ticker}:{exchange}"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+# 5. 日経VI（日経公式ルート）
+if "日経VI" not in indices_data:
     try:
-        res = requests.get(url, headers=headers, timeout=5)
+        res = requests.get("https://indexes.nikkei.co.jp/nkave/index/profile?idx=nk225vi", headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
         soup = BeautifulSoup(res.text, "html.parser")
-        p = soup.find(class_="YMlKec fxKbKc").text.strip()
-        c = soup.find(class_="JwB6zf").text.strip()
-        return p, c
-    except: return None, None
-
-p_t, c_t = get_google_finance("TOPIX", "INDEXTKY")
-if p_t: indices_data["日本TOPIX"] = {"price": p_t, "change": c_t}
-
-p_v, c_v = get_google_finance("NI225VIX", "INDEXNIK")
-if p_v: indices_data["日経VI"] = {"price": p_v, "change": c_v}
+        p = soup.find("div", class_="index-value").text.strip()
+        c_text = soup.find("div", class_="index-diff").text.strip()
+        c = c_text.split("(")[1].replace(")", "").strip() if "(" in c_text else c_text
+        indices_data["日経VI"] = {"price": p, "change": c}
+    except: pass
 
 
 # --- スケジュール等取得 ---
