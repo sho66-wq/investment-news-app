@@ -59,7 +59,6 @@ safety_settings = [
 
 new_articles = []
 if target_entries:
-    # 【継続】事実と推測を完全に分けて出力させる厳格な指示
     prompt = """
 あなたはプロの機関投資家です。以下の【ニュース一覧】を全て分析し、以下のJSON配列フォーマットで出力してください。
 カテゴリ: "国内株・企業業績", "米国株・海外株", "日米金利・物価・為替", "世界経済・マクロ指標", "世界情勢・地政学", "成長テーマ・新技術", "商品・暗号資産", "不動産・住宅市場", "生活・社会保障", "その他"
@@ -96,10 +95,11 @@ for item in news_data:
 with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
 
-# --- 指数取得 ---
+
+# --- 執念の多段指数取得 ---
 indices_data = {}
 
-# 1. まず yfinance で取れるものを確保
+# 1. 安定している基本の yfinance
 symbols = {
     "^N225": "日本日経平均",
     "NIY=F": "日経先物",
@@ -123,68 +123,79 @@ for sym, name in symbols.items():
             indices_data[name] = {"price": price_str, "change": f"{change_pct:.2f}%"}
     except: pass
 
-# 2. ご指定のサイト (nikkei225jp.com/chart/) からの直接取得にチャレンジ！
+# 2. 国債（財務省）
 try:
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    res_chart = requests.get("https://nikkei225jp.com/chart/", headers=headers, timeout=10)
-    soup_chart = BeautifulSoup(res_chart.text, "html.parser")
-    for script in soup_chart(["script", "style"]): script.extract()
-    text_chart = soup_chart.get_text(separator=' ', strip=True)
-
-    # 幻覚を防ぐため、非常に厳格なAI抽出プロンプトを使用
-    prompt_chart = f"""
-    あなたはデータ抽出AIです。以下のテキストはリアルタイム市況サイトの生データです。
-    ここから「日本TOPIX」「日経VI」「日本国債10年利回り」の【最新価格】と【前日比】を抽出してください。
-    ※重要警告※ サイトの仕様（JavaScript等）により、テキスト内に数字が存在しない場合があります。もしテキスト内に該当する指標の明確な数値がない場合は、絶対に推測せず、必ず "取得不可" と出力してください。日経平均など他の数字と間違えないでください。
-
-    出力形式 (JSON):
-    {{
-      "日本TOPIX_price": "価格（例: 3609.40 または 取得不可）",
-      "日本TOPIX_change": "前日比（例: +2.91% または 取得不可）",
-      "日経VI_price": "価格（例: 35.07 または 取得不可）",
-      "日経VI_change": "前日比（例: +8.11% または 取得不可）",
-      "日本国債10年利回り_price": "価格（例: 2.282 または 取得不可）",
-      "日本国債10年利回り_change": "前日比（例: +0.067 または 取得不可）"
-    }}
-
-    テキストデータ:
-    {text_chart[:6000]}
-    """
-    response_chart = model.generate_content(prompt_chart, safety_settings=safety_settings, generation_config={"response_mime_type": "application/json"})
-    if response_chart.parts:
-        c_data = json.loads(response_chart.text)
-        
-        if c_data.get("日本TOPIX_price") and "取得不可" not in c_data.get("日本TOPIX_price"):
-            indices_data["日本TOPIX"] = {"price": c_data["日本TOPIX_price"], "change": c_data.get("日本TOPIX_change", "0.0%")}
-            
-        if c_data.get("日経VI_price") and "取得不可" not in c_data.get("日経VI_price"):
-            indices_data["日経VI"] = {"price": c_data["日経VI_price"], "change": c_data.get("日経VI_change", "0.0%")}
-            
-        if c_data.get("日本国債10年利回り_price") and "取得不可" not in c_data.get("日本国債10年利回り_price"):
-            indices_data["日本国債10年利回り"] = {"price": c_data["日本国債10年利回り_price"], "change": c_data.get("日本国債10年利回り_change", "0.0")}
+    res = requests.get('https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv', timeout=10)
+    res.encoding = 'shift_jis'
+    lines = [line.split(',') for line in res.text.strip().split('\n') if line]
+    valid_lines = [l for l in lines if len(l) >= 11 and l[10].replace('.', '', 1).isdigit()]
+    if len(valid_lines) >= 2:
+        val = float(valid_lines[-1][10])
+        change = val - float(valid_lines[-2][10])
+        indices_data["日本国債10年利回り"] = {"price": f"{val:.3f}%", "change": f"{change:.3f}pt"}
 except: pass
 
-# 3. 万が一、指定サイトがJavaScriptで空っぽだった場合の最強の予備ルート（財務省＆株探）
-if "日本国債10年利回り" not in indices_data:
+# 3. 鬼門の TOPIX と 日経VI（多段ルーティング）
+def get_hard_index(name, yf_sym, gf_tick, gf_exch, yj_code):
+    # ルートA: yfinance
     try:
-        res = requests.get('https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv', timeout=5)
-        res.encoding = 'shift_jis'
-        lines = [line.split(',') for line in res.text.strip().split('\n') if line]
-        valid_lines = [l for l in lines if len(l) >= 11 and l[10].replace('.', '', 1).isdigit()]
-        if len(valid_lines) >= 2:
-            val = float(valid_lines[-1][10])
-            change = val - float(valid_lines[-2][10])
-            indices_data["日本国債10年利回り"] = {"price": f"{val:.3f}%", "change": f"{change:.3f}pt"}
+        ticker = yf.Ticker(yf_sym)
+        hist = ticker.history(period="5d")
+        if len(hist) >= 2:
+            prev_close = hist['Close'].iloc[-2]
+            current = hist['Close'].iloc[-1]
+            change_pct = ((current - prev_close) / prev_close) * 100
+            price_str = f"{current:.2f}" if current < 1000 else f"{current:,.2f}"
+            return {"price": price_str, "change": f"{change_pct:.2f}%"}
     except: pass
 
-if "日本TOPIX" not in indices_data:
+    # ルートB: Google Finance
     try:
-        res_t = requests.get("https://kabutan.jp/stock/?code=0010", headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-        soup_t = BeautifulSoup(res_t.text, "html.parser")
-        p_topix = soup_t.find(class_="vdt-eq-a").text.strip()
-        c_topix = soup_t.find(class_="vdt-cv-a").text.strip()
-        if p_topix: indices_data["日本TOPIX"] = {"price": p_topix, "change": c_topix}
+        url = f"https://www.google.com/finance/quote/{gf_tick}:{gf_exch}"
+        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}, timeout=5)
+        soup = BeautifulSoup(res.text, "html.parser")
+        p = soup.find(class_="YMlKec fxKbKc").text.strip()
+        c_tag = soup.find(class_="JwB6zf")
+        c = c_tag.text.strip() if c_tag else "0.00%"
+        if p: return {"price": p, "change": c}
     except: pass
+
+    # ルートC: Yahoo!ファイナンス日本版
+    try:
+        url = f"https://finance.yahoo.co.jp/quote/{yj_code}"
+        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}, timeout=5)
+        soup = BeautifulSoup(res.text, "html.parser")
+        # spanタグの中に数字が入っている部分を探す
+        p_tag = soup.select_one('span[class*="_3rXWJKZF"]')
+        if p_tag:
+            p = p_tag.text.strip()
+            c_tag = soup.select_one('span[class*="_1mWGJb8R"]')
+            c = c_tag.text.strip() if c_tag else "0.00%"
+            return {"price": p, "change": c}
+    except: pass
+    
+    return None
+
+# TOPIX取得アタック
+if "日本TOPIX" not in indices_data:
+    res = get_hard_index("日本TOPIX", "^TOPX", "TOPIX", "INDEXTKY", "998405.O")
+    if res: indices_data["日本TOPIX"] = res
+
+# 日経VI取得アタック
+if "日経VI" not in indices_data:
+    res = get_hard_index("日経VI", "^JNIV", "NI225VIX", "INDEXNIK", "998407.O")
+    if res: indices_data["日経VI"] = res
+    else:
+        # 最終手段：日経公式
+        try:
+            url = "https://indexes.nikkei.co.jp/nkave/index/profile?idx=nk225vi"
+            res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+            soup = BeautifulSoup(res.text, "html.parser")
+            p = soup.find("div", class_="index-value").text.strip()
+            c_text = soup.find("div", class_="index-diff").text.strip()
+            c = c_text.split("(")[1].replace(")", "").strip() if "(" in c_text else c_text
+            if p: indices_data["日経VI"] = {"price": p, "change": c}
+        except: pass
 
 
 # --- スケジュールとみんかぶ取得 ---
