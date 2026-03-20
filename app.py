@@ -16,8 +16,12 @@ if os.path.exists(SCHEDULE_FILE):
             sched_data = json.load(f)
     except: pass
 
+# 左 1.2 : 右 2.5 のレイアウト
 col_left, col_right = st.columns([1.2, 2.5])
 
+# ----------------------------------------
+# 【左側カラム】市況ボード ＋ 内部データ
+# ----------------------------------------
 with col_left:
     st.subheader("📈 リアルタイム市況")
     
@@ -25,7 +29,6 @@ with col_left:
     if isinstance(indices_data, dict) and indices_data:
         order = ["日本日経平均", "日経先物", "日本TOPIX", "日本国債10年利回り", "為替 ドル円", "為替 ユーロ円", "米国NYダウ", "VIX恐怖指数", "日経VI", "WTI原油先物", "NY金先物", "ビットコイン"]
         
-        # 【修正】スペース（字下げ）を完全に排除し、1行でHTMLを構築することでコード漏れを防止！
         html_board = "<style>.market-board { width: 100%; border-collapse: collapse; font-family: sans-serif; box-shadow: 0 1px 3px rgba(0,0,0,0.2); border-radius: 4px; overflow: hidden; } .market-board tr { border-bottom: 1px solid #ddd; background-color: #fff; } .market-board td { padding: 10px 8px; vertical-align: middle; } .market-board .name-col { width: 35%; background-color: #424242; color: #fff; font-weight: bold; font-size: 13px; text-align: left; border-right: 1px solid #555;} .market-board .price-col { width: 35%; font-size: 18px; font-weight: bold; text-align: right; color: #333; } .market-board .change-col { width: 30%; font-size: 14px; font-weight: bold; text-align: right; } .change-up { color: #d32f2f; background-color: #ffebee; border-radius: 3px; padding: 4px; display: inline-block;} .change-down { color: #2e7d32; background-color: #e8f5e9; border-radius: 3px; padding: 4px; display: inline-block;} .change-flat { color: #555; background-color: #f5f5f5; border-radius: 3px; padding: 4px; display: inline-block;} </style><table class='market-board'>"
         
         for name in order:
@@ -41,12 +44,9 @@ with col_left:
             else:
                 change_class = "change-flat"
                 
-            # ここも字下げなしで追加
             html_board += f"<tr><td class='name-col'>{name}</td><td class='price-col'>{p}</td><td class='change-col'><span class='{change_class}'>{c}</span></td></tr>"
             
         html_board += "</table>"
-        
-        # HTMLとして画面に描画
         st.markdown(html_board, unsafe_allow_html=True)
     else:
         st.write("データを収集中です。")
@@ -54,6 +54,21 @@ with col_left:
     st.write("")
     st.caption("*(データ取得元: [Yahoo Finance](https://finance.yahoo.co.jp/) / [Google Finance](https://www.google.com/finance/) / [財務省](https://www.mof.go.jp/) / [日経プロフィル](https://indexes.nikkei.co.jp/))*")
 
+    st.write("") # 少し隙間を空ける
+    
+    # ▼▼ ここに右側から「日経225内部データ」をお引越ししました！ ▼▼
+    st.subheader("🔍 日経225 内部データ")
+    with st.container(border=True):
+        st.markdown(sched_data.get('contribution', 'データ収集中...'))
+        
+        # 細いカラムに合わせて、ボタンを横並びではなく「縦積み」にしています
+        st.link_button("📊 みんかぶ（全銘柄寄与度）を開く", "https://fu.minkabu.jp/chart/nikkei225/contribution", use_container_width=True)
+        st.link_button("🗺️ 日経平均ヒートマップを開く", "https://nikkei225jp.com/chart/nikkei.php", use_container_width=True)
+
+
+# ----------------------------------------
+# 【右側カラム】スケジュール ＋ ニュース（経済指標）
+# ----------------------------------------
 with col_right:
     st.subheader("📅 本日の市場データ・予定")
     col_sched, col_news = st.columns(2)
@@ -66,17 +81,12 @@ with col_right:
             st.markdown("#### 📰 経済指標")
             st.markdown(sched_data.get('news', 'データ収集中...'))
 
-    st.subheader("🔍 日経225 内部データ（騰落数・寄与度）")
-    with st.container(border=True):
-        st.markdown(sched_data.get('contribution', 'データ収集中...'))
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            st.link_button("📊 みんかぶ（全銘柄寄与度）を開く", "https://fu.minkabu.jp/chart/nikkei225/contribution", use_container_width=True)
-        with col_btn2:
-            st.link_button("🗺️ 日経平均ヒートマップを開く", "https://nikkei225jp.com/chart/nikkei.php", use_container_width=True)
 
 st.divider()
 
+# ----------------------------------------
+# 【下段】AIニュース分析
+# ----------------------------------------
 DATA_FILE = "news_data.json"
 if os.path.exists(DATA_FILE):
     with open(DATA_FILE, "r", encoding="utf-8") as f:
