@@ -22,18 +22,21 @@ def colorize_text(text):
         text
     )
     
-    # 2. プラスの数字（緑色 ＋ うっすら背景色）
-    # (単位あり)
-    text = re.sub(r'([+▲↑]\s?\d+(?:,\d{3})*(?:\.\d+)?\s?(?:%|pt|円|ドル|ポイント|件|人|万|億|兆|倍))', r'<span style="color: #2e7d32; font-weight: bold; background-color: rgba(46,125,50,0.1); padding: 0 4px; border-radius: 3px;">\1</span>', text)
-    # (小数のみ・単位なし)
+    # 【強化】単位の間にスペース（例: 万 人、億 円）があっても一括で色塗りするように改善！
+    units = r'(?:\s*(?:%|pt|円|ドル|ポイント|件|人|万|億|兆|倍))+'
+
+    # 2. プラスの数字（＋や▲などの明示的な記号あり）
+    text = re.sub(rf'([+▲↑]\s?\d+(?:,\d{{3}})*(?:\.\d+)?{units})', r'<span style="color: #2e7d32; font-weight: bold; background-color: rgba(46,125,50,0.1); padding: 0 4px; border-radius: 3px;">\1</span>', text)
     text = re.sub(r'(?<!\d)([+▲↑]\s?\d+(?:,\d{3})*\.\d+)(?!\d)', r'<span style="color: #2e7d32; font-weight: bold; background-color: rgba(46,125,50,0.1); padding: 0 4px; border-radius: 3px;">\1</span>', text)
 
-    # 3. マイナスの数字（赤色 ＋ うっすら背景色）※日付を回避
-    # (単位あり)
-    text = re.sub(r'([-▼↓]\s?\d+(?:,\d{3})*(?:\.\d+)?\s?(?:%|pt|円|ドル|ポイント|件|人|万|億|兆|倍))', r'<span style="color: #d32f2f; font-weight: bold; background-color: rgba(211,47,47,0.1); padding: 0 4px; border-radius: 3px;">\1</span>', text)
-    # (小数のみ・単位なし)
+    # 3. マイナスの数字（ーや▼などの明示的な記号あり）
+    text = re.sub(rf'([-▼↓]\s?\d+(?:,\d{{3}})*(?:\.\d+)?{units})', r'<span style="color: #d32f2f; font-weight: bold; background-color: rgba(211,47,47,0.1); padding: 0 4px; border-radius: 3px;">\1</span>', text)
     text = re.sub(r'(?<!\d)([-▼↓]\s?\d+(?:,\d{3})*\.\d+)(?!\d)', r'<span style="color: #d32f2f; font-weight: bold; background-color: rgba(211,47,47,0.1); padding: 0 4px; border-radius: 3px;">\1</span>', text)
-    
+
+    # 4. 【新規追加】プラスの数字（記号はないが、単位がついているもの）
+    # 例: 4.89万人、2.47万件、5.2% など。マイナス記号の直後にあるものは除外します。
+    text = re.sub(rf'(?<![-▼↓+▲↑])\b(\d+(?:,\d{{3}})*(?:\.\d+)?{units})', r'<span style="color: #2e7d32; font-weight: bold; background-color: rgba(46,125,50,0.1); padding: 0 4px; border-radius: 3px;">\1</span>', text)
+
     return text
 
 
@@ -90,7 +93,6 @@ with col_left:
     st.write("")
     st.subheader("🔍 日経225 内部データ")
     with st.container(border=True):
-        # 魔法のカラーリング機能を適用！ (HTMLを許可)
         st.markdown(colorize_text(sched_data.get('contribution', 'データ収集中...')), unsafe_allow_html=True)
         
         st.link_button("📊 みんかぶ（全銘柄寄与度）を開く", "https://fu.minkabu.jp/chart/nikkei225/contribution", use_container_width=True)
@@ -150,7 +152,6 @@ if os.path.exists(DATA_FILE):
                         except: f_time = "不明"
                         st.caption(f"⏱ 取得日時: {f_time} | [🔗 元記事を読む]({item.get('link', '')})")
                         
-                        # st.infoの見た目をHTMLで再現しつつ、内部のカラーリングを有効にする裏技！
                         summary_html = f"<div style='background-color: #f0f2f6; padding: 16px; border-radius: 0.5rem; margin-bottom: 16px;'>{colorize_text(item.get('summary', ''))}</div>"
                         st.markdown(summary_html, unsafe_allow_html=True)
                         st.divider()
