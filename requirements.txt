@@ -1,3 +1,5 @@
 streamlit
+yfinance
 feedparser
 google-generativeai
+beautifulsoup4
