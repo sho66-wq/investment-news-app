@@ -59,7 +59,7 @@ safety_settings = [
 
 new_articles = []
 if target_entries:
-    # 【改善】要約のフォーマットを厳格化し、事実と推測を完全に分離
+    # 【継続】事実と推測を完全に分けて出力させる厳格な指示
     prompt = """
 あなたはプロの機関投資家です。以下の【ニュース一覧】を全て分析し、以下のJSON配列フォーマットで出力してください。
 カテゴリ: "国内株・企業業績", "米国株・海外株", "日米金利・物価・為替", "世界経済・マクロ指標", "世界情勢・地政学", "成長テーマ・新技術", "商品・暗号資産", "不動産・住宅市場", "生活・社会保障", "その他"
@@ -70,7 +70,7 @@ if target_entries:
     "summary": "【事実】記事で報道されている確定した事実を1〜2行で簡潔に記載。\\n【プロの推測】その事実を元に、プロの投資家として背景や今後の市場・関連銘柄への具体的な影響を推測・深読みした内容を2〜3行で記載。"
   }
 ]
-※summaryの中身は必ず上記の「【事実】」と「【プロの推測】」の2つの見出しを含め、改行（\\n）で分けて出力してください。「要約中」などの手抜きは絶対禁止です。
+※summaryの中身は必ず「【事実】」と「【プロの推測】」の2つの見出しを含め、改行（\\n）で分けて出力してください。「要約中」などの手抜きは絶対禁止です。
 """
     for i, entry in enumerate(target_entries):
         prompt += f"ID: {i}\nタイトル: {entry.title}\n\n"
@@ -96,18 +96,17 @@ for item in news_data:
 with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
 
-# --- 指数取得（TOPIXと日経VIは安定ルート） ---
+# --- 指数取得 ---
 indices_data = {}
 
+# 1. まず yfinance で取れるものを確保
 symbols = {
     "^N225": "日本日経平均",
     "NIY=F": "日経先物",
-    "^TOPX": "日本TOPIX",
     "JPY=X": "為替 ドル円",
     "EURJPY=X": "為替 ユーロ円",
     "^DJI": "米国NYダウ",
     "^VIX": "VIX恐怖指数",
-    "^JNIV": "日経VI",
     "CL=F": "WTI原油先物",
     "GC=F": "NY金先物",
     "BTC-JPY": "ビットコイン"
@@ -124,32 +123,67 @@ for sym, name in symbols.items():
             indices_data[name] = {"price": price_str, "change": f"{change_pct:.2f}%"}
     except: pass
 
-# 国債（財務省）
+# 2. ご指定のサイト (nikkei225jp.com/chart/) からの直接取得にチャレンジ！
 try:
-    res = requests.get('https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv', timeout=10)
-    res.encoding = 'shift_jis'
-    lines = [line.split(',') for line in res.text.strip().split('\n') if line]
-    valid_lines = [l for l in lines if len(l) >= 11 and l[10].replace('.', '', 1).isdigit()]
-    if len(valid_lines) >= 2:
-        val = float(valid_lines[-1][10])
-        change = val - float(valid_lines[-2][10])
-        indices_data["日本国債10年利回り"] = {"price": f"{val:.3f}%", "change": f"{change:.3f}pt"}
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    res_chart = requests.get("https://nikkei225jp.com/chart/", headers=headers, timeout=10)
+    soup_chart = BeautifulSoup(res_chart.text, "html.parser")
+    for script in soup_chart(["script", "style"]): script.extract()
+    text_chart = soup_chart.get_text(separator=' ', strip=True)
+
+    # 幻覚を防ぐため、非常に厳格なAI抽出プロンプトを使用
+    prompt_chart = f"""
+    あなたはデータ抽出AIです。以下のテキストはリアルタイム市況サイトの生データです。
+    ここから「日本TOPIX」「日経VI」「日本国債10年利回り」の【最新価格】と【前日比】を抽出してください。
+    ※重要警告※ サイトの仕様（JavaScript等）により、テキスト内に数字が存在しない場合があります。もしテキスト内に該当する指標の明確な数値がない場合は、絶対に推測せず、必ず "取得不可" と出力してください。日経平均など他の数字と間違えないでください。
+
+    出力形式 (JSON):
+    {{
+      "日本TOPIX_price": "価格（例: 3609.40 または 取得不可）",
+      "日本TOPIX_change": "前日比（例: +2.91% または 取得不可）",
+      "日経VI_price": "価格（例: 35.07 または 取得不可）",
+      "日経VI_change": "前日比（例: +8.11% または 取得不可）",
+      "日本国債10年利回り_price": "価格（例: 2.282 または 取得不可）",
+      "日本国債10年利回り_change": "前日比（例: +0.067 または 取得不可）"
+    }}
+
+    テキストデータ:
+    {text_chart[:6000]}
+    """
+    response_chart = model.generate_content(prompt_chart, safety_settings=safety_settings, generation_config={"response_mime_type": "application/json"})
+    if response_chart.parts:
+        c_data = json.loads(response_chart.text)
+        
+        if c_data.get("日本TOPIX_price") and "取得不可" not in c_data.get("日本TOPIX_price"):
+            indices_data["日本TOPIX"] = {"price": c_data["日本TOPIX_price"], "change": c_data.get("日本TOPIX_change", "0.0%")}
+            
+        if c_data.get("日経VI_price") and "取得不可" not in c_data.get("日経VI_price"):
+            indices_data["日経VI"] = {"price": c_data["日経VI_price"], "change": c_data.get("日経VI_change", "0.0%")}
+            
+        if c_data.get("日本国債10年利回り_price") and "取得不可" not in c_data.get("日本国債10年利回り_price"):
+            indices_data["日本国債10年利回り"] = {"price": c_data["日本国債10年利回り_price"], "change": c_data.get("日本国債10年利回り_change", "0.0")}
 except: pass
 
-
-# 取得に失敗した場合の保険（日経公式からの日経VI直接取得）
-if "日経VI" not in indices_data or "取得不可" in indices_data["日経VI"].get("price", "取得不可"):
+# 3. 万が一、指定サイトがJavaScriptで空っぽだった場合の最強の予備ルート（財務省＆株探）
+if "日本国債10年利回り" not in indices_data:
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        res_vi = requests.get("https://indexes.nikkei.co.jp/nkave/index/profile?idx=nk225vi", headers=headers, timeout=5)
-        soup_vi = BeautifulSoup(res_vi.text, "html.parser")
-        p_vi = soup_vi.find("div", class_="index-value").text.strip()
-        c_vi_text = soup_vi.find("div", class_="index-diff").text.strip()
-        if "(" in c_vi_text:
-            c_vi = c_vi_text.split("(")[1].replace(")", "").strip()
-        else:
-            c_vi = c_vi_text
-        if p_vi: indices_data["日経VI"] = {"price": p_vi, "change": c_vi}
+        res = requests.get('https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv', timeout=5)
+        res.encoding = 'shift_jis'
+        lines = [line.split(',') for line in res.text.strip().split('\n') if line]
+        valid_lines = [l for l in lines if len(l) >= 11 and l[10].replace('.', '', 1).isdigit()]
+        if len(valid_lines) >= 2:
+            val = float(valid_lines[-1][10])
+            change = val - float(valid_lines[-2][10])
+            indices_data["日本国債10年利回り"] = {"price": f"{val:.3f}%", "change": f"{change:.3f}pt"}
+    except: pass
+
+if "日本TOPIX" not in indices_data:
+    try:
+        res_t = requests.get("https://kabutan.jp/stock/?code=0010", headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+        soup_t = BeautifulSoup(res_t.text, "html.parser")
+        p_topix = soup_t.find(class_="vdt-eq-a").text.strip()
+        c_topix = soup_t.find(class_="vdt-cv-a").text.strip()
+        if p_topix: indices_data["日本TOPIX"] = {"price": p_topix, "change": c_topix}
     except: pass
 
 
