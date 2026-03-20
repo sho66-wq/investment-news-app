@@ -59,7 +59,7 @@ safety_settings = [
 
 new_articles = []
 if target_entries:
-    # 【改善1】AIへの要約指示を「詳細かつ具体的」に超強化！
+    # 【改善】要約のフォーマットを厳格化し、事実と推測を完全に分離
     prompt = """
 あなたはプロの機関投資家です。以下の【ニュース一覧】を全て分析し、以下のJSON配列フォーマットで出力してください。
 カテゴリ: "国内株・企業業績", "米国株・海外株", "日米金利・物価・為替", "世界経済・マクロ指標", "世界情勢・地政学", "成長テーマ・新技術", "商品・暗号資産", "不動産・住宅市場", "生活・社会保障", "その他"
@@ -67,9 +67,10 @@ if target_entries:
   {
     "id": 0, 
     "category": "選択したカテゴリ", 
-    "summary": "記事の背景、重要な事実、および今後の市場や生活への具体的な影響について、3〜4行で詳細かつ具体的に要約してください。「要約中」などの手抜きは絶対に禁止です。"
+    "summary": "【事実】記事で報道されている確定した事実を1〜2行で簡潔に記載。\\n【プロの推測】その事実を元に、プロの投資家として背景や今後の市場・関連銘柄への具体的な影響を推測・深読みした内容を2〜3行で記載。"
   }
 ]
+※summaryの中身は必ず上記の「【事実】」と「【プロの推測】」の2つの見出しを含め、改行（\\n）で分けて出力してください。「要約中」などの手抜きは絶対禁止です。
 """
     for i, entry in enumerate(target_entries):
         prompt += f"ID: {i}\nタイトル: {entry.title}\n\n"
@@ -95,17 +96,18 @@ for item in news_data:
 with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(filtered_news_data, f, ensure_ascii=False, indent=2)
 
-# --- 指数取得 ---
+# --- 指数取得（TOPIXと日経VIは安定ルート） ---
 indices_data = {}
 
-# 1. yfinance
 symbols = {
     "^N225": "日本日経平均",
     "NIY=F": "日経先物",
+    "^TOPX": "日本TOPIX",
     "JPY=X": "為替 ドル円",
     "EURJPY=X": "為替 ユーロ円",
     "^DJI": "米国NYダウ",
     "^VIX": "VIX恐怖指数",
+    "^JNIV": "日経VI",
     "CL=F": "WTI原油先物",
     "GC=F": "NY金先物",
     "BTC-JPY": "ビットコイン"
@@ -122,7 +124,7 @@ for sym, name in symbols.items():
             indices_data[name] = {"price": price_str, "change": f"{change_pct:.2f}%"}
     except: pass
 
-# 2. 国債（財務省）
+# 国債（財務省）
 try:
     res = requests.get('https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv', timeout=10)
     res.encoding = 'shift_jis'
@@ -134,30 +136,21 @@ try:
         indices_data["日本国債10年利回り"] = {"price": f"{val:.3f}%", "change": f"{change:.3f}pt"}
 except: pass
 
-# 3. TOPIX（株探から確実取得）
-try:
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    res_t = requests.get("https://kabutan.jp/stock/?code=0010", headers=headers, timeout=5)
-    soup_t = BeautifulSoup(res_t.text, "html.parser")
-    p_topix = soup_t.find(class_="vdt-eq-a").text.strip()
-    c_topix = soup_t.find(class_="vdt-cv-a").text.strip()
-    if p_topix: indices_data["日本TOPIX"] = {"price": p_topix, "change": c_topix}
-except: pass
 
-# 4. 【改善2】日経VIを大元の「日経公式」から直接取得！（絶対確実）
-try:
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    res_vi = requests.get("https://indexes.nikkei.co.jp/nkave/index/profile?idx=nk225vi", headers=headers, timeout=5)
-    soup_vi = BeautifulSoup(res_vi.text, "html.parser")
-    p_vi = soup_vi.find("div", class_="index-value").text.strip()
-    # 前日比の部分（例: "-0.36 (-1.45%)" から % の部分だけを抜く）
-    c_vi_text = soup_vi.find("div", class_="index-diff").text.strip()
-    if "(" in c_vi_text:
-        c_vi = c_vi_text.split("(")[1].replace(")", "").strip()
-    else:
-        c_vi = c_vi_text
-    if p_vi: indices_data["日経VI"] = {"price": p_vi, "change": c_vi}
-except: pass
+# 取得に失敗した場合の保険（日経公式からの日経VI直接取得）
+if "日経VI" not in indices_data or "取得不可" in indices_data["日経VI"].get("price", "取得不可"):
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res_vi = requests.get("https://indexes.nikkei.co.jp/nkave/index/profile?idx=nk225vi", headers=headers, timeout=5)
+        soup_vi = BeautifulSoup(res_vi.text, "html.parser")
+        p_vi = soup_vi.find("div", class_="index-value").text.strip()
+        c_vi_text = soup_vi.find("div", class_="index-diff").text.strip()
+        if "(" in c_vi_text:
+            c_vi = c_vi_text.split("(")[1].replace(")", "").strip()
+        else:
+            c_vi = c_vi_text
+        if p_vi: indices_data["日経VI"] = {"price": p_vi, "change": c_vi}
+    except: pass
 
 
 # --- スケジュールとみんかぶ取得 ---
@@ -200,15 +193,16 @@ try:
     for script in soup_min(["script", "style"]): script.extract()
     text_min = soup_min.get_text(separator=' ', strip=True)[:15000]
 
-    # 【改善3】AIへの指示を強化し、「{」や「[」の暗号出力を完全に禁止！
     prompt_s = f"""
-あなたは金融アシスタントです。以下のWebページから情報を抽出し、必ず指定のJSON形式で出力してください。
-各値の中身には `{{` や `[` 、`"` などのプログラム用の記号を「絶対に」含めず、純粋な箇条書きのテキスト(`・`)と改行(`\\n`)のみを使ってください。
+あなたは金融アシスタントです。以下のWebページから情報を抽出し、指定のJSON形式で出力してください。
+【重要ルール】
+出力する文字列は、そのまま画面に表示して美しく見えるように、Markdown形式（箇条書き `- ` や見出し `### `）を必ず使ってください。改行には `\\n` を使用してください。
+各値の中身には `{{` や `[` 、`"` などのプログラム用の記号を「絶対に」含めず、純粋な箇条書きのテキスト(`- `)と改行(`\\n`)のみを使ってください。
 
 {{
-  "schedule": "今週・本日の予定をきれいな日本語の箇条書きで",
-  "news": "経済指標をきれいな日本語の箇条書きで",
-  "contribution": "値上がり・値下がり数と寄与度TOP10をきれいな日本語の箇条書きで"
+  "schedule": "今週・本日の予定を、日付ごとに箇条書き（- ）で整理し、見やすく階層化したMarkdownテキスト",
+  "news": "主要経済指標（結果と予想など）を、日付ごとに箇条書き（- ）で整理し見やすくまとめたMarkdownテキスト",
+  "contribution": "値上がり・値下がり数と、寄与度上位・下位を箇条書き（- ）で見やすくまとめたMarkdownテキスト"
 }}
 
 【スケジュール】\n{text_sched}\n【みんかぶ】\n{text_min}"""
