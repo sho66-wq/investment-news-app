@@ -104,7 +104,7 @@ for sym, name in symbols.items():
             indices_data[name] = {"price": f"{curr:,.2f}", "change": f"{((curr - prev) / prev * 100):.2f}%"}
     except: pass
 
-# 2. TOPIXのETF代替（yfinanceルート）
+# 2. TOPIXのETF代替
 if "日本TOPIX" not in indices_data:
     try:
         hist = yf.Ticker("1306.T").history(period="5d")
@@ -113,7 +113,6 @@ if "日本TOPIX" not in indices_data:
             indices_data["日本TOPIX"] = {"price": f"{curr:,.2f} (ETF)", "change": f"{((curr - prev) / prev * 100):.2f}%"}
     except: pass
 
-# 3. TOPIXのETF代替（Google Financeルート：1306:TYO）最強の保険
 if "日本TOPIX" not in indices_data:
     try:
         res = requests.get("https://www.google.com/finance/quote/1306:TYO", headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
@@ -123,7 +122,7 @@ if "日本TOPIX" not in indices_data:
         indices_data["日本TOPIX"] = {"price": f"{p} (ETF)", "change": c}
     except: pass
 
-# 4. 国債（財務省）
+# 3. 国債（財務省）
 try:
     res = requests.get('https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv', timeout=5)
     res.encoding = 'shift_jis'
@@ -134,7 +133,7 @@ try:
         indices_data["日本国債10年利回り"] = {"price": f"{val:.3f}%", "change": f"{change:.3f}pt"}
 except: pass
 
-# 5. 日経VI（日経公式ルート）
+# 4. 日経VI（日経公式ルート）
 if "日経VI" not in indices_data:
     try:
         res = requests.get("https://indexes.nikkei.co.jp/nkave/index/profile?idx=nk225vi", headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
@@ -143,6 +142,16 @@ if "日経VI" not in indices_data:
         c_text = soup.find("div", class_="index-diff").text.strip()
         c = c_text.split("(")[1].replace(")", "").strip() if "(" in c_text else c_text
         indices_data["日経VI"] = {"price": p, "change": c}
+    except: pass
+
+# 5. 【超強力裏技】日経VIのETF代替（2036.T）ルート
+if "日経VI" not in indices_data:
+    try:
+        hist_vi = yf.Ticker("2036.T").history(period="5d")
+        if len(hist_vi) >= 2:
+            prev, curr = hist_vi['Close'].iloc[-2], hist_vi['Close'].iloc[-1]
+            change_pct = ((curr - prev) / prev) * 100
+            indices_data["日経VI"] = {"price": f"{curr:,.2f} (ETF)", "change": f"{change_pct:.2f}%"}
     except: pass
 
 
