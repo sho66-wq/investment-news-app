@@ -41,6 +41,7 @@ with col_left:
         st.markdown("- [Yahoo!ファイナンス](https://finance.yahoo.co.jp/)")
         st.markdown("- [Google Finance](https://www.google.com/finance/)")
         st.markdown("- [財務省(国債)](https://www.mof.go.jp/)")
+        st.markdown("- [日経プロフィル(VI)](https://indexes.nikkei.co.jp/)")
 
 with col_right:
     st.subheader("📅 本日の市場データ・予定")
@@ -97,5 +98,7 @@ if os.path.exists(DATA_FILE):
                             f_time = dt.strftime("%Y/%m/%d %H:%M")
                         except: f_time = "不明"
                         st.caption(f"⏱ 取得日時: {f_time} | [🔗 元記事を読む]({item.get('link', '')})")
-                        st.markdown(item.get('summary', ''))
+                        
+                        # 【修正】st.markdown から st.info に戻し、青い枠を復活させました！
+                        st.info(item.get('summary', ''))
                         st.divider()
