@@ -2,11 +2,6 @@ import streamlit as st
 import json
 import os
 from datetime import datetime
-import ast
-
-def clean_text(text):
-    if not isinstance(text, str): return str(text)
-    return text.replace("['", "").replace("']", "").replace("', '", "\n")
 
 st.set_page_config(page_title="投資ニュースAIサマリー", page_icon="📈", layout="wide")
 st.title("📊 個人専用：投資ニュースAIサマリー (自動更新版) 🚀")
@@ -24,7 +19,8 @@ if os.path.exists(SCHEDULE_FILE):
         with col1:
             with st.container(border=True):
                 st.markdown("#### 🗓️ 主な予定")
-                st.markdown(clean_text(sched_data.get('schedule', 'データ収集中...')))
+                # 余計なフィルターを外し、美しい箇条書きをそのまま表示
+                st.markdown(sched_data.get('schedule', 'データ収集中...'))
                 
         with col2:
             with st.container(border=True):
@@ -34,19 +30,20 @@ if os.path.exists(SCHEDULE_FILE):
                     order = ["日本日経平均", "日経先物", "日本TOPIX", "日本国債10年利回り", "為替 ドル円", "為替 ユーロ円", "米国NYダウ", "VIX恐怖指数", "日経VI", "WTI原油先物", "NY金先物", "ビットコイン"]
                     m_cols = st.columns(2)
                     for i, name in enumerate(order):
-                        d = indices_data.get(name, {"price": "取得不可", "change": "0.0"})
-                        m_cols[i % 2].metric(label=name, value=d.get('price', '取得不可'), delta=d.get('change', '0.0'))
+                        d = indices_data.get(name, {"price": "取得不可", "change": "0.0%"})
+                        m_cols[i % 2].metric(label=name, value=d.get('price', '取得不可'), delta=d.get('change', '0.0%'))
                 else:
                     st.write("現在データを収集中です。")
+                st.caption("*(データ取得元: Yahoo Finance / 財務省)*")
                 
         with col3:
             with st.container(border=True):
                 st.markdown("#### 📰 NEWS（経済指標）")
-                st.markdown(clean_text(sched_data.get('news', 'データ収集中...')))
+                st.markdown(sched_data.get('news', 'データ収集中...'))
 
         st.subheader("🔍 日経225 内部データ（騰落数・寄与度）")
         with st.container(border=True):
-            st.markdown(clean_text(sched_data.get('contribution', 'データ収集中...')))
+            st.markdown(sched_data.get('contribution', 'データ収集中...'))
             st.link_button("📊 みんかぶ（全銘柄寄与度）を開く", "https://fu.minkabu.jp/chart/nikkei225/contribution", use_container_width=True)
             st.link_button("🗺️ 日経平均ヒートマップを開く", "https://nikkei225jp.com/chart/nikkei.php", use_container_width=True)
             
@@ -77,7 +74,7 @@ if os.path.exists(DATA_FILE):
             title_sum = item.get("title", "") + item.get("summary", "")
             
             if cat in legacy_mapping: cat = legacy_mapping[cat]
-            if any(k in title_sum for k in ["トランプ", "台湾", "ロシア", "プーチン", "イラン", "空爆", "地政学"]): cat = "世界情勢・地政学"
+            if any(k in title_sum for k in ["トランプ", "台湾", "ロシア", "プーチン", "イラン", "空爆", "地政学", "ミサイル"]): cat = "世界情勢・地政学"
             if any(k in title_sum for k in ["原油", "バレル", "経済悪影響", "インフレ"]): cat = "世界経済・マクロ指標"
             
             if cat in results: results[cat].append(item)
